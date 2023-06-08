@@ -1,0 +1,8 @@
+[workspace]
+members = ["rearch-capsule-macro", "rearch"]
+
+[workspace.package]
+version = "0.0.0"
+edition = "2021"
+license = "MIT"
+# TODO other package info, we can take a look at meilisearch and redb for inspiration

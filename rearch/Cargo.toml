@@ -1,0 +1,15 @@
+[package]
+name = "rearch"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+concread = { version = "0.4.1", default-features = false, features = ["maps"] }
+paste = "1.*"
+rearch-capsule-macro = { path = "../rearch-capsule-macro", optional = true }
+tokio = { version = "1.*", default-features = false, optional = true }
+
+[features]
+default = ["capsule-macro"]
+capsule-macro = ["dep:rearch-capsule-macro"]
+tokio-future-side-effect = ["dep:tokio"]
