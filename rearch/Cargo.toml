@@ -7,7 +7,7 @@ edition.workspace = true
 concread = { version = "0.4.1", default-features = false, features = ["maps"] }
 paste = "1.*"
 rearch-capsule-macro = { path = "../rearch-capsule-macro", optional = true }
-tokio = { version = "1.*", default-features = false, optional = true }
+tokio = { version = "1.*", default-features = false, features = ["rt"], optional = true }
 
 [features]
 default = ["capsule-macro"]

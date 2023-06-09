@@ -12,7 +12,7 @@ use std::{
 pub use rearch_capsule_macro::{capsule, factory};
 
 mod side_effects;
-pub use side_effects::BuiltinSideEffects;
+pub use side_effects::*;
 
 /// Performs a *consistent* read on all supplied capsules.
 ///
