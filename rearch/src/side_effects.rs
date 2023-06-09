@@ -131,7 +131,7 @@ pub trait BuiltinSideEffects {
             },
             dependencies,
         );
-        (&*state).clone()
+        (*state).clone()
     }
 }
 
@@ -175,7 +175,7 @@ pub trait DependencyList: Send + Sync + 'static {
 
 impl<DL: DependencyList> DependencyList for Arc<DL> {
     fn eq(&self, other: &Self) -> bool {
-        let s: &DL = &**self;
+        let s: &DL = self;
         s.eq(other)
     }
 }
@@ -219,7 +219,7 @@ mod tests {
             (1, "", true)
         }
         fn c() -> impl DependencyList {
-            ()
+            // () implicitly returned
         }
     }
 }
