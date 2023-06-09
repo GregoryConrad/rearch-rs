@@ -12,4 +12,4 @@ tokio = { version = "1.*", default-features = false, features = ["rt"], optional
 [features]
 default = ["capsule-macro"]
 capsule-macro = ["dep:rearch-capsule-macro"]
-tokio-future-side-effect = ["dep:tokio"]
+tokio-side-effects = ["dep:tokio"]

@@ -1,3 +1,4 @@
+#![feature(return_position_impl_trait_in_trait)]
 use concread::hashmap::{HashMapReadTxn, HashMapWriteTxn};
 use std::{
     any::{Any, TypeId},
@@ -580,7 +581,7 @@ mod tests {
                 handle: &mut impl SideEffectHandle,
             ) -> Self::T {
                 let (state, set_state) = handle.state(0);
-                (*state, set_state)
+                (*state, Box::new(set_state))
             }
         }
 

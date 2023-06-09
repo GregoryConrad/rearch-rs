@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use rearch::{capsule, factory, BuiltinSideEffects, Container, SideEffectHandle};
 
 #[capsule]
@@ -36,8 +34,9 @@ fn uses_factory(BigStringFactory(factory): BigStringFactory) -> String {
 }
 
 #[capsule]
-fn stateful(handle: &mut impl SideEffectHandle) -> (Arc<u8>, Box<dyn Fn(u8) + Sync + Send>) {
-    handle.state(0)
+fn stateful(handle: &mut impl SideEffectHandle) -> (u8, Box<dyn Fn(u8) + Sync + Send>) {
+    let (state, set_state) = handle.state(0u8);
+    (*state, Box::new(set_state))
 }
 
 fn main() {

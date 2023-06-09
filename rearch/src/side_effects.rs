@@ -13,14 +13,15 @@ pub trait BuiltinSideEffects {
         self.register_side_effect(|_| callback())
     }
 
-    fn rebuilder(&mut self) -> Arc<Box<dyn Fn() + Sync + Send>> {
-        self.register_side_effect(|api| api.rebuilder())
+    fn rebuilder(&mut self) -> Arc<impl Fn() + Send + Sync + 'static> {
+        let rebuilder = self.register_side_effect(|api| api.rebuilder());
+        Arc::new(move || rebuilder())
     }
 
     fn rebuildless_state_queue<T: Sync + Send + 'static>(
         &mut self,
         default: T,
-    ) -> (Arc<T>, Box<dyn Fn(T) + Sync + Send>) {
+    ) -> (Arc<T>, impl Fn(T) + Sync + Send + 'static) {
         let queue = self.callonce(|| {
             let state_queue = Mutex::new(VecDeque::new());
             state_queue
@@ -47,30 +48,28 @@ pub trait BuiltinSideEffects {
                 .push_back(Arc::new(new_state));
         };
 
-        (curr_state, Box::new(set_state))
+        (curr_state, set_state)
     }
 
     fn state<T: Sync + Send + 'static>(
         &mut self,
         default: T,
-    ) -> (Arc<T>, Box<dyn Fn(T) + Sync + Send>) {
+    ) -> (Arc<T>, impl Fn(T) + Sync + Send + 'static) {
         let rebuild = self.rebuilder();
         let (state, set_state) = self.rebuildless_state_queue(default);
-        (
-            state,
-            Box::new(move |new_state| {
-                set_state(new_state);
-                rebuild();
-            }),
-        )
+        (state, move |new_state| {
+            set_state(new_state);
+            rebuild();
+        })
     }
 
-    // TODO do we need to have the last thing be called on capsule disposal?
-    fn effect<DL: DependencyList>(
-        &mut self,
-        effect: impl FnOnce() -> Box<dyn FnOnce() + Sync + Send>,
-        dependencies: DL,
-    ) {
+    // TODO should we call the last disposal when the capsule itself is disposed?
+    fn effect<DL, OnDispose, Effect>(&mut self, effect: Effect, dependencies: DL)
+    where
+        DL: DependencyList,
+        OnDispose: FnOnce() + Sync + Send + 'static,
+        Effect: FnOnce() -> OnDispose,
+    {
         let state = self.callonce(|| Mutex::new(None::<(DL, _)>));
         let mut state = state.lock().expect("Mutex shouldn't fail to lock");
 
@@ -110,28 +109,40 @@ pub trait BuiltinSideEffects {
             .clone()
     }
 
-    #[cfg(feature = "tokio-future-side-effect")]
+    #[cfg(feature = "tokio-side-effects")]
     fn future<R: Sync + Send + 'static>(
         &mut self,
         future: impl std::future::Future<Output = R> + Send + 'static,
         dependencies: impl DependencyList,
     ) -> AsyncValue<R> {
-        let (state, set_state) = self.state(AsyncValue::AsyncLoading(None));
+        let rebuild = self.rebuilder();
+        let mutex = self.callonce(|| Mutex::new(AsyncValue::AsyncLoading(None)));
+
         self.effect(
             || {
-                let curr_data = state.data();
+                {
+                    let mut state = mutex.lock().expect("Mutex shouldn't fail to lock");
+                    let curr_data = state.data();
+                    *state = AsyncValue::AsyncLoading(curr_data);
+                }
+
+                let mutex_clone = mutex.clone();
                 let handle = tokio::task::spawn(async move {
-                    set_state(AsyncValue::AsyncLoading(curr_data));
                     let data = future.await;
-                    set_state(AsyncValue::AsyncData(Arc::new(data)));
+                    {
+                        let mut state = mutex_clone.lock().expect("Mutex shouldn't fail to lock");
+                        *state = AsyncValue::AsyncData(Arc::new(data));
+                    }
+                    rebuild();
                 });
-                Box::new(move || {
-                    handle.abort();
-                })
+
+                move || handle.abort()
             },
             dependencies,
         );
-        (*state).clone()
+
+        let state = mutex.lock().expect("Mutex shouldn't fail to lock");
+        state.clone()
     }
 }
 
