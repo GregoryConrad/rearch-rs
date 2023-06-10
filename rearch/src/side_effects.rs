@@ -13,21 +13,34 @@ pub trait BuiltinSideEffects {
         self.register_side_effect(|_| callback())
     }
 
-    fn rebuilder(&mut self) -> Arc<impl Fn() + Send + Sync + 'static> {
-        let rebuilder = self.register_side_effect(|api| api.rebuilder());
-        Arc::new(move || rebuilder())
+    fn rebuilder<Mutation: FnOnce()>(&mut self) -> impl Fn(Mutation) + Send + Sync + 'static {
+        let rebuild = self.register_side_effect(|api| api.rebuilder());
+        move |to_run| {
+            // TODO the rebuild function should probably take a closure for something to run
+            //  at start of build? This will fix possible consistency issues due to concurrency
+            to_run();
+            rebuild();
+        }
+    }
+
+    fn internal_state<T: Send + 'static>(
+        &mut self,
+        initial_state: T,
+    ) -> impl Fn(Box<dyn FnMut(std::sync::MutexGuard<T>)>) {
+        let state = self.callonce(|| Mutex::new(initial_state));
+        move |mut to_run| to_run(state.lock().expect("Mutex shouldn't fail to lock"))
     }
 
     fn rebuildless_state_queue<T: Sync + Send + 'static>(
         &mut self,
-        default: T,
+        create_initial: impl FnOnce() -> T,
     ) -> (Arc<T>, impl Fn(T) + Sync + Send + 'static) {
         let queue = self.callonce(|| {
             let state_queue = Mutex::new(VecDeque::new());
             state_queue
                 .lock()
                 .expect("Queue mutex shouldn't fail to lock")
-                .push_back(Arc::new(default));
+                .push_back(Arc::new(create_initial()));
             state_queue
         });
 
@@ -51,16 +64,35 @@ pub trait BuiltinSideEffects {
         (curr_state, set_state)
     }
 
-    fn state<T: Sync + Send + 'static>(
+    fn state_from_fn<T: Sync + Send + 'static>(
         &mut self,
-        default: T,
+        create_initial: impl FnOnce() -> T,
     ) -> (Arc<T>, impl Fn(T) + Sync + Send + 'static) {
         let rebuild = self.rebuilder();
-        let (state, set_state) = self.rebuildless_state_queue(default);
-        (state, move |new_state| {
-            set_state(new_state);
-            rebuild();
-        })
+        let (state, set_state) = self.rebuildless_state_queue(create_initial);
+
+        let set_state = {
+            let set_state = Arc::new(set_state);
+            move |new_state| {
+                let set_state = set_state.clone();
+                rebuild(move || set_state(new_state))
+            }
+        };
+
+        (state, set_state)
+    }
+
+    fn state_from_default<T: Send + Sync + Default + 'static>(
+        &mut self,
+    ) -> (Arc<T>, impl Fn(T) + Sync + Send + 'static) {
+        self.state_from_fn(T::default)
+    }
+
+    fn state<T: Sync + Send + 'static>(
+        &mut self,
+        initial: T,
+    ) -> (Arc<T>, impl Fn(T) + Sync + Send + 'static) {
+        self.state_from_fn(|| initial)
     }
 
     // TODO should we call the last disposal when the capsule itself is disposed?
@@ -114,26 +146,25 @@ pub trait BuiltinSideEffects {
         &mut self,
         future: impl std::future::Future<Output = R> + Send + 'static,
         dependencies: impl DependencyList,
-    ) -> AsyncValue<R> {
+    ) -> AsyncState<R> {
         let rebuild = self.rebuilder();
-        let mutex = self.callonce(|| Mutex::new(AsyncValue::AsyncLoading(None)));
+        let mutex = self.callonce(|| Mutex::new(AsyncState::Loading(None)));
 
         self.effect(
             || {
                 {
                     let mut state = mutex.lock().expect("Mutex shouldn't fail to lock");
                     let curr_data = state.data();
-                    *state = AsyncValue::AsyncLoading(curr_data);
+                    *state = AsyncState::Loading(curr_data);
                 }
 
-                let mutex_clone = mutex.clone();
+                let mutex = mutex.clone();
                 let handle = tokio::task::spawn(async move {
                     let data = future.await;
-                    {
-                        let mut state = mutex_clone.lock().expect("Mutex shouldn't fail to lock");
-                        *state = AsyncValue::AsyncData(Arc::new(data));
-                    }
-                    rebuild();
+                    rebuild(move || {
+                        let mut state = mutex.lock().expect("Mutex shouldn't fail to lock");
+                        *state = AsyncState::Complete(Arc::new(data));
+                    });
                 });
 
                 move || handle.abort()
@@ -143,6 +174,102 @@ pub trait BuiltinSideEffects {
 
         let state = mutex.lock().expect("Mutex shouldn't fail to lock");
         state.clone()
+    }
+
+    /// A thin wrapper around the state side effect that enables easy state persistence.
+    ///
+    /// You provide a `read` function and a `write` function,
+    /// and you receive of status of the latest read/write operation,
+    /// in addition to a persist function that persists new state and triggers rebuilds.
+    ///
+    /// Note: when possible, it is highly recommended to use async_persist instead of sync_persist.
+    /// This function is blocking, which will prevent other capsule updates.
+    /// However, this function is perfect for quick I/O, like when using something similar to redb.
+    fn sync_persist<T, R: Sync + Send + 'static>(
+        &mut self,
+        read: impl FnOnce() -> R,
+        mut write: impl FnMut(T) -> R,
+    ) -> (Arc<R>, impl FnMut(T)) {
+        let (state, set_state) = self.state_from_fn(read);
+        let persist = move |new_data| {
+            let persist_result = write(new_data);
+            set_state(persist_result);
+        };
+        (state, persist)
+    }
+
+    #[cfg(feature = "tokio-side-effects")]
+    fn async_persist<T, R, Reader, Writer, ReadFuture, WriteFuture>(
+        &mut self,
+        read: Reader,
+        write: Writer,
+    ) -> (AsyncState<R>, impl FnMut(T))
+    where
+        T: Send + 'static,
+        R: Sync + Send + 'static,
+        Reader: FnOnce() -> ReadFuture + Send + 'static,
+        Writer: Fn(T) -> WriteFuture + Send + Sync + 'static,
+        ReadFuture: std::future::Future<Output = R> + Send + 'static,
+        WriteFuture: std::future::Future<Output = R> + Send + Sync + 'static,
+    {
+        let read_rebuild = self.rebuilder();
+        let write_rebuild = self.rebuilder();
+        let mutex = self.callonce(|| {
+            Mutex::new((
+                AsyncState::Loading(None),
+                None::<tokio::task::JoinHandle<()>>,
+            ))
+        });
+
+        self.callonce(|| {
+            let rebuild = read_rebuild;
+            let mutex = mutex.clone();
+            tokio::task::spawn(async move {
+                let initial_data = read().await;
+
+                // If the existing state does not yet have any data, let's stitch some in
+                let mut state = mutex.lock().expect("Mutex shouldn't fail to lock");
+                if state.0.data().is_none() {
+                    state.0 = AsyncState::Loading(Some(Arc::new(initial_data)));
+                    drop(state);
+
+                    // We don't do the above state update in the rebuild since we don't care
+                    // if we are given our own build for this read state, as any write state
+                    // that would be set after is newer/more relevant than this old read data
+                    rebuild(|| {});
+                }
+            })
+        });
+
+        let curr_state = mutex
+            .lock()
+            .expect("Mutex shouldn't fail to lock")
+            .0
+            .clone();
+
+        let write = Arc::new(write);
+        let rebuild = Arc::new(write_rebuild);
+        let persist = move |new_data| {
+            let mut state = mutex.lock().expect("Mutex shouldn't fail to lock");
+
+            if let Some(old_handle) = &state.1 {
+                old_handle.abort();
+            }
+
+            let mutex = mutex.clone();
+            let write = write.clone();
+            let rebuild = rebuild.clone();
+            state.0 = AsyncState::Loading(state.0.data());
+            state.1 = Some(tokio::task::spawn(async move {
+                let result = write(new_data).await;
+                rebuild(move || {
+                    let mut state = mutex.lock().expect("Mutex shouldn't fail to lock");
+                    *state = (AsyncState::Complete(Arc::new(result)), None);
+                });
+            }));
+        };
+
+        (curr_state, persist)
     }
 }
 
@@ -155,27 +282,33 @@ impl<Handle: crate::SideEffectHandle> BuiltinSideEffects for Handle {
     }
 }
 
-pub enum AsyncValue<T> {
-    AsyncLoading(Option<Arc<T>>),
-    AsyncData(Arc<T>),
-}
+#[cfg(feature = "tokio-side-effects")]
+pub use async_state::*;
 
-impl<T> AsyncValue<T> {
-    fn data(&self) -> Option<Arc<T>> {
-        match self {
-            AsyncValue::AsyncLoading(previous) => previous.clone(),
-            AsyncValue::AsyncData(data) => Some(data.clone()),
+#[cfg(feature = "tokio-side-effects")]
+mod async_state {
+    use std::sync::Arc;
+
+    pub enum AsyncState<T> {
+        Loading(Option<Arc<T>>),
+        Complete(Arc<T>),
+    }
+
+    impl<T> AsyncState<T> {
+        pub fn data(&self) -> Option<Arc<T>> {
+            match self {
+                AsyncState::Loading(previous) => previous.clone(),
+                AsyncState::Complete(data) => Some(data.clone()),
+            }
         }
     }
-}
 
-impl<T> Clone for AsyncValue<T> {
-    fn clone(&self) -> Self {
-        match self {
-            AsyncValue::AsyncLoading(previous_data) => {
-                AsyncValue::AsyncLoading(previous_data.clone())
+    impl<T> Clone for AsyncState<T> {
+        fn clone(&self) -> Self {
+            match self {
+                AsyncState::Loading(previous_data) => AsyncState::Loading(previous_data.clone()),
+                AsyncState::Complete(data) => AsyncState::Complete(data.clone()),
             }
-            AsyncValue::AsyncData(data) => AsyncValue::AsyncData(data.clone()),
         }
     }
 }
