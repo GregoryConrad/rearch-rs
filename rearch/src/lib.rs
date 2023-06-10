@@ -30,7 +30,7 @@ pub use side_effects::*;
 /// Internally, tries to read all supplied capsules with a read transaction first (cheap),
 /// but if that fails (i.e., capsules' data not present in the container),
 /// read!() spins up a write txn and initializes all needed capsules (which blocks).
-/// TODO name this arc_read! and then add a read! attribute macro in other crate that returns refs?
+/// TODO name this arc_read! and then add a read! attribute macro in other crate that returns refs
 #[macro_export]
 macro_rules! read {
     ($container:expr, $($C:ident),+) => {
@@ -239,13 +239,56 @@ impl<'a> ContainerWriteTxn<'a> {
     fn build_capsule<C: Capsule + 'static>(&mut self) {
         // This uses a little hack that works fairly well to maintain safety;
         // we remove node from graph and add it back in after to prevent a double &mut self borrow
+
+        // TODO can we remove this hack by using the capsule manager fn pointer ourselves?
+
         let capsule_type = TypeId::of::<C>();
+
         let mut node = self
             .nodes
             .remove(&capsule_type)
             .unwrap_or_else(|| CapsuleManager::new::<C>(self.rebuilder.clone()));
-        node.build_dependent_subgraph(self);
+        node.build_self(self);
+        let build_order = node.create_build_order(self);
         self.nodes.insert(capsule_type, node);
+
+        let build_order = self.garbage_collect_super_pure_nodes(build_order);
+
+        build_order.iter().for_each(|id| {
+            let mut node = self.nodes.remove(id).expect("All nodes should be in graph");
+            node.build_self(self);
+            self.nodes.insert(*id, node);
+        });
+    }
+
+    fn get_node_or_panic(&mut self, id: &TypeId) -> &mut CapsuleManager {
+        self.nodes
+            .get_mut(id)
+            .expect("All nodes should be in graph")
+    }
+
+    /// Helper function that given a build_order, garbage collects all super pure nodes
+    /// and returns the new build order without the (now garbage collected) super pure nodes
+    fn garbage_collect_super_pure_nodes(&mut self, build_order: Vec<TypeId>) -> Vec<TypeId> {
+        build_order
+            .into_iter()
+            .rev()
+            .filter(|id| {
+                let node = self.get_node_or_panic(id);
+                let is_disposable = node.is_disposable();
+
+                if is_disposable {
+                    node.dependencies.clone().iter().for_each(|dep| {
+                        self.get_node_or_panic(&dep).dependents.remove(id);
+                    });
+                    self.nodes.remove(id);
+                    self.data.remove(id);
+                }
+
+                !is_disposable
+            })
+            .rev()
+            .collect::<Vec<_>>()
     }
 }
 
@@ -309,9 +352,28 @@ impl CapsuleManager {
 }
 
 impl CapsuleManager {
+    fn build_self(&mut self, txn: &mut ContainerWriteTxn) {
+        // Clear up all dependency information from previous build
+        // This will all be set by the CapsuleReader in this build
+        self.dependencies.clone().iter().for_each(|dep| {
+            let id = self.id;
+            self.get_node(txn, &dep).dependents.remove(&id);
+        });
+        self.dependencies.clear();
+
+        // Perform this build
+        (self.build_and_cache)(self, txn);
+    }
+
+    fn is_disposable(&self) -> bool {
+        let is_super_pure = self.side_effect_data.is_empty();
+        is_super_pure && self.dependents.is_empty()
+    }
+
     /// Helper method that fetches the node with the specified id.
     /// This is needed because a node will never be in the graph while it is building,
     /// which keeps the borrow checker happy by preventing a double &mut borrow
+    // TODO can we remove this now after the refactor?
     fn get_node<'a>(
         &'a mut self,
         txn: &'a mut ContainerWriteTxn,
@@ -326,7 +388,7 @@ impl CapsuleManager {
         }
     }
 
-    /// Helper function that creates this node's dependent subgraph build order (without self)
+    /// Function that creates this node's dependent subgraph build order (without self)
     fn create_build_order(&mut self, txn: &mut ContainerWriteTxn) -> Vec<TypeId> {
         let mut build_order = Vec::new();
         let mut stack = self.dependents.iter().copied().collect::<Vec<_>>();
@@ -343,69 +405,6 @@ impl CapsuleManager {
         }
 
         build_order
-    }
-
-    /// Helper function that given a build_order, garbage collects all super pure nodes
-    /// and returns the new build order without the (now garbage collected) super pure nodes
-    fn garbage_collect_super_pure_nodes(
-        &mut self,
-        txn: &mut ContainerWriteTxn,
-        build_order: Vec<TypeId>,
-    ) -> Vec<TypeId> {
-        build_order
-            .into_iter()
-            .rev()
-            .filter(|id| {
-                let node = self.get_node(txn, id);
-                let is_disposable = node.is_disposable();
-
-                if is_disposable {
-                    node.dependencies.clone().iter().for_each(|dep| {
-                        self.get_node(txn, &dep).dependents.remove(id);
-                    });
-                    txn.nodes.remove(id);
-                    txn.data.remove(id);
-                }
-
-                !is_disposable
-            })
-            .rev()
-            .collect::<Vec<_>>()
-    }
-}
-
-impl CapsuleManager {
-    fn build_self(&mut self, txn: &mut ContainerWriteTxn) {
-        // Clear up all dependency information from previous build
-        // This will all be set by the CapsuleReader in this build
-        self.dependencies.clone().iter().for_each(|dep| {
-            let id = self.id;
-            self.get_node(txn, &dep).dependents.remove(&id);
-        });
-        self.dependencies.clear();
-
-        // Perform this build
-        (self.build_and_cache)(self, txn);
-    }
-
-    fn build_dependent_subgraph(&mut self, txn: &mut ContainerWriteTxn) {
-        let build_order = self.create_build_order(txn);
-        let build_order = self.garbage_collect_super_pure_nodes(txn, build_order);
-
-        self.build_self(txn);
-        build_order.iter().for_each(|id| {
-            let mut node = txn
-                .nodes
-                .remove(id)
-                .expect("Dependent nodes should be in the graph");
-            node.build_self(txn);
-            txn.nodes.insert(*id, node);
-        });
-    }
-
-    fn is_disposable(&self) -> bool {
-        let is_super_pure = self.side_effect_data.is_empty();
-        is_super_pure && self.dependents.is_empty()
     }
 }
 
