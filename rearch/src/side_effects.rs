@@ -3,10 +3,14 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+use crate::{SideEffectHandle, SideEffectHandleApi};
+
 pub trait BuiltinSideEffects {
+    type Api: SideEffectHandleApi;
+
     fn register_side_effect<R: Sync + Send + 'static>(
         &mut self,
-        side_effect: impl FnOnce(&mut dyn crate::SideEffectHandleApi) -> R,
+        side_effect: impl FnOnce(&mut Self::Api) -> R,
     ) -> Arc<R>;
 
     fn callonce<R: Sync + Send + 'static>(&mut self, callback: impl FnOnce() -> R) -> Arc<R> {
@@ -273,12 +277,13 @@ pub trait BuiltinSideEffects {
     }
 }
 
-impl<Handle: crate::SideEffectHandle> BuiltinSideEffects for Handle {
+impl<Handle: SideEffectHandle> BuiltinSideEffects for Handle {
+    type Api = Handle::Api;
     fn register_side_effect<R: Sync + Send + 'static>(
         &mut self,
-        side_effect: impl FnOnce(&mut dyn crate::SideEffectHandleApi) -> R,
+        side_effect: impl FnOnce(&mut Self::Api) -> R,
     ) -> Arc<R> {
-        crate::SideEffectHandle::register_side_effect(self, side_effect)
+        SideEffectHandle::register_side_effect(self, side_effect)
     }
 }
 
