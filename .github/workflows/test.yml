@@ -28,10 +28,12 @@ jobs:
         run: cargo +nightly fmt --all --check
       - name: Compile
         run: cargo +nightly build --workspace --all-targets --all-features
-      - name: Code analysis
+      - name: Minimal-feature code analysis
+        run: cargo +nightly clippy --workspace -- -D warnings
+      - name: Full-feature code analysis
         run: cargo +nightly clippy --workspace --all-targets --all-features -- -D warnings
       - name: Run tests
-        run: cargo +nightly test
+        run: cargo +nightly test --all-features
 
       - name: Run tests under WASI
         if: startsWith(matrix.os, 'macos')
