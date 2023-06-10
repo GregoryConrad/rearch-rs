@@ -95,7 +95,7 @@ pub trait SideEffectHandleApi {
 /// created by capsules and their dependencies/dependents.
 /// To read data from the container, it is suggested that you use the `read!()` macro.
 /// See the README for more.
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct Container(Arc<ContainerStore>);
 impl Container {
     /// Initializes a new `Container`.
@@ -103,7 +103,7 @@ impl Container {
     /// Containers contain no data when first created.
     /// Use `read!()` to populate and read some capsules!
     pub fn new() -> Self {
-        Container(Arc::new(ContainerStore::new()))
+        Container(Arc::new(ContainerStore::default()))
     }
 
     /// Runs the supplied callback with a `ContainerReadTxn` that allows you to read
@@ -113,10 +113,7 @@ impl Container {
     /// Instead, use `read!()` which wraps around `with_read_txn` and `with_write_txn`
     /// and ensures a consistent read amongst all capsules without extra effort.
     pub fn with_read_txn<R>(&self, to_run: impl FnOnce(&ContainerReadTxn) -> R) -> R {
-        let txn = ContainerReadTxn {
-            data: self.0.data.read(),
-        };
-        to_run(&txn)
+        self.0.with_read_txn(to_run)
     }
 
     /// Runs the supplied callback with a `ContainerWriteTxn` that allows you to read and populate
@@ -136,25 +133,21 @@ impl Container {
         self.0.with_write_txn(rebuilder, to_run)
     }
 }
-impl Default for Container {
-    fn default() -> Self {
-        Self::new()
-    }
-}
 
 /// The internal backing store for a `Container`.
 /// All capsule data is stored within `data`, and all data flow graph nodes are stored in `nodes`.
 /// Keys for both are simply the `TypeId` of capsules, like `TypeId::of::<SomeCapsule>()`.
+#[derive(Default)]
 struct ContainerStore {
     data: concread::hashmap::HashMap<TypeId, Arc<dyn Any + Sync + Send>>,
     nodes: Mutex<std::collections::HashMap<TypeId, CapsuleManager>>,
 }
 impl ContainerStore {
-    fn new() -> ContainerStore {
-        ContainerStore {
-            data: concread::hashmap::HashMap::new(),
-            nodes: Mutex::new(std::collections::HashMap::new()),
-        }
+    fn with_read_txn<R>(&self, to_run: impl FnOnce(&ContainerReadTxn) -> R) -> R {
+        let txn = ContainerReadTxn {
+            data: self.data.read(),
+        };
+        to_run(&txn)
     }
 
     fn with_write_txn<R>(
@@ -163,10 +156,10 @@ impl ContainerStore {
         to_run: impl FnOnce(&mut ContainerWriteTxn) -> R,
     ) -> R {
         let data = self.data.write();
-        let mut nodes = self.nodes.lock().expect("Mutex shouldn't fail to lock");
+        let nodes = &mut self.nodes.lock().expect("Mutex shouldn't fail to lock");
         let mut txn = ContainerWriteTxn {
             data,
-            nodes: &mut nodes,
+            nodes,
             rebuilder,
         };
 
@@ -234,57 +227,83 @@ impl<'a> ContainerWriteTxn<'a> {
             .downcast::<C::T>()
             .expect("Types should be properly enforced due to generics")
     }
+}
 
-    /// Forcefully triggers a build/rebuild on the supplied capsule
+impl<'a> ContainerWriteTxn<'a> {
+    /// Forcefully triggers a first build or rebuild for the supplied capsule
     fn build_capsule<C: Capsule + 'static>(&mut self) {
-        // This uses a little hack that works fairly well to maintain safety;
-        // we remove node from graph and add it back in after to prevent a double &mut self borrow
+        let id = TypeId::of::<C>();
 
-        // TODO can we remove this hack by using the capsule manager fn pointer ourselves?
+        self.nodes
+            .entry(id)
+            .or_insert_with(|| CapsuleManager::new::<C>(self.rebuilder.clone()));
+        self.build_single_node(&id);
 
-        let capsule_type = TypeId::of::<C>();
-
-        let mut node = self
-            .nodes
-            .remove(&capsule_type)
-            .unwrap_or_else(|| CapsuleManager::new::<C>(self.rebuilder.clone()));
-        node.build_self(self);
-        let build_order = node.create_build_order(self);
-        self.nodes.insert(capsule_type, node);
-
+        // Since we have already built node above (since *it must be built in this method*),
+        // we can skip it with skip(1) when we handling the rest of the dependent subgraph
+        let build_order = self.create_build_order(id).into_iter().skip(1);
         let build_order = self.garbage_collect_super_pure_nodes(build_order);
-
-        build_order.iter().for_each(|id| {
-            let mut node = self.nodes.remove(id).expect("All nodes should be in graph");
-            node.build_self(self);
-            self.nodes.insert(*id, node);
-        });
+        build_order.iter().for_each(|id| self.build_single_node(id));
     }
 
-    fn get_node_or_panic(&mut self, id: &TypeId) -> &mut CapsuleManager {
+    /// Gets the requested node or panics if it is not in the graph
+    fn node_or_panic(&mut self, id: &TypeId) -> &mut CapsuleManager {
         self.nodes
             .get_mut(id)
-            .expect("All nodes should be in graph")
+            .expect("Requested node should be in the graph")
+    }
+
+    fn build_single_node(&mut self, id: &TypeId) {
+        // Remove old dependency info since it will change on this build
+        // We use std::mem::replace below to prevent needing a clone on the existing dependencies
+        let node = self.node_or_panic(id);
+        let old_deps = std::mem::replace(&mut node.dependencies, HashSet::new());
+        old_deps.iter().for_each(|dep| {
+            self.node_or_panic(dep).dependents.remove(&id);
+        });
+
+        // Trigger the build (which also populates its new dependencies in self)
+        (self.node_or_panic(id).build)(self);
+    }
+
+    /// Function that creates this node's dependent subgraph build order (with self)
+    fn create_build_order(&mut self, start: TypeId) -> Vec<TypeId> {
+        let mut build_order = Vec::new();
+        let mut stack = vec![start];
+        let mut visited = HashSet::new();
+
+        while let Some(id) = stack.pop() {
+            visited.insert(id);
+            build_order.push(id);
+
+            self.node_or_panic(&id)
+                .dependents
+                .iter()
+                .copied()
+                .filter(|dep| !visited.contains(dep))
+                .for_each(|dep| stack.push(dep));
+        }
+
+        build_order
     }
 
     /// Helper function that given a build_order, garbage collects all super pure nodes
     /// and returns the new build order without the (now garbage collected) super pure nodes
-    fn garbage_collect_super_pure_nodes(&mut self, build_order: Vec<TypeId>) -> Vec<TypeId> {
+    fn garbage_collect_super_pure_nodes(
+        &mut self,
+        build_order: impl DoubleEndedIterator<Item = TypeId>,
+    ) -> Vec<TypeId> {
         build_order
-            .into_iter()
             .rev()
             .filter(|id| {
-                let node = self.get_node_or_panic(id);
-                let is_disposable = node.is_disposable();
-
+                let is_disposable = self.node_or_panic(id).is_disposable();
                 if is_disposable {
-                    node.dependencies.clone().iter().for_each(|dep| {
-                        self.get_node_or_panic(&dep).dependents.remove(id);
+                    let node = self.nodes.remove(id).expect("Node should be in graph");
+                    node.dependencies.iter().for_each(|dep| {
+                        self.node_or_panic(&dep).dependents.remove(id);
                     });
-                    self.nodes.remove(id);
                     self.data.remove(id);
                 }
-
                 !is_disposable
             })
             .rev()
@@ -293,140 +312,79 @@ impl<'a> ContainerWriteTxn<'a> {
 }
 
 // This struct is completely typeless in order to avoid *a lot* of dynamic dispatch
-// when dealing with the graph nodes.
+// that we used to have when dealing with the graph nodes.
 // We avoid needing types by:
-// - Holding a copy of our own TypeId (from our associated Capsule)
 // - Storing a function pointer that performs the actual build,
 // - Storing a function pointer that can create rebuilders
-// Those are the only few type-specific behaviors!
+// Those are the only type-specific behaviors!
 struct CapsuleManager {
-    id: TypeId,
     dependencies: HashSet<TypeId>,
     dependents: HashSet<TypeId>,
     side_effect_data: Vec<Arc<dyn Any + Sync + Send>>,
     capsule_rebuilder: CapsuleRebuilder,
-    build_and_cache: fn(&mut CapsuleManager, &mut ContainerWriteTxn),
-    self_rebuilder: fn(&CapsuleManager) -> Box<dyn Fn() + Sync + Send>,
+    create_rebuilder: fn(&CapsuleManager) -> Box<dyn Fn() + Sync + Send>,
+    build: fn(&mut ContainerWriteTxn),
 }
 
 impl CapsuleManager {
     fn new<C: Capsule + 'static>(rebuilder: CapsuleRebuilder) -> Self {
         CapsuleManager {
-            id: TypeId::of::<C>(),
             dependencies: HashSet::new(),
             dependents: HashSet::new(),
             side_effect_data: Vec::new(),
             capsule_rebuilder: rebuilder,
-            build_and_cache: Self::build_and_cache::<C>,
-            self_rebuilder: Self::self_rebuilder::<C>,
+            build: Self::build::<C>,
+            create_rebuilder: Self::create_rebuilder::<C>,
         }
     }
 
-    fn self_rebuilder<C: Capsule + 'static>(
+    fn create_rebuilder<C: Capsule + 'static>(
         manager: &CapsuleManager,
     ) -> Box<dyn Fn() + Send + Sync> {
         let rebuilder = manager.capsule_rebuilder.clone();
         Box::new(move || rebuilder.rebuild::<C>())
     }
 
-    fn build_and_cache<C: Capsule + 'static>(
-        manager: &mut CapsuleManager,
-        txn: &mut ContainerWriteTxn,
-    ) {
-        let this_type = TypeId::of::<C>();
-        // We need RefCell in order to safely do a double &mut borrow on manager
-        let self_ref = RefCell::new(manager);
+    fn build<C: Capsule + 'static>(txn: &mut ContainerWriteTxn) {
+        let id = TypeId::of::<C>();
+        // We need RefCell in order to safely do a double &mut borrow on txn
+        let txn = &RefCell::new(txn);
         let new_data = C::build(
             &mut CapsuleReaderImpl::<C> {
-                manager: &self_ref,
                 txn,
                 ghost: PhantomData,
             },
             &mut CapsuleSideEffectHandleImpl {
-                manager: &self_ref,
+                id: TypeId::of::<C>(),
+                txn,
                 index: 0,
             },
         );
-        txn.data.insert(this_type, Arc::new(new_data));
-    }
-}
-
-impl CapsuleManager {
-    fn build_self(&mut self, txn: &mut ContainerWriteTxn) {
-        // Clear up all dependency information from previous build
-        // This will all be set by the CapsuleReader in this build
-        self.dependencies.clone().iter().for_each(|dep| {
-            let id = self.id;
-            self.get_node(txn, &dep).dependents.remove(&id);
-        });
-        self.dependencies.clear();
-
-        // Perform this build
-        (self.build_and_cache)(self, txn);
+        txn.borrow_mut().data.insert(id, Arc::new(new_data));
     }
 
     fn is_disposable(&self) -> bool {
         let is_super_pure = self.side_effect_data.is_empty();
         is_super_pure && self.dependents.is_empty()
     }
-
-    /// Helper method that fetches the node with the specified id.
-    /// This is needed because a node will never be in the graph while it is building,
-    /// which keeps the borrow checker happy by preventing a double &mut borrow
-    // TODO can we remove this now after the refactor?
-    fn get_node<'a>(
-        &'a mut self,
-        txn: &'a mut ContainerWriteTxn,
-        id: &TypeId,
-    ) -> &'a mut CapsuleManager {
-        if id == &self.id {
-            self
-        } else {
-            txn.nodes
-                .get_mut(id)
-                .expect("All referenced nodes should be in the node graph")
-        }
-    }
-
-    /// Function that creates this node's dependent subgraph build order (without self)
-    fn create_build_order(&mut self, txn: &mut ContainerWriteTxn) -> Vec<TypeId> {
-        let mut build_order = Vec::new();
-        let mut stack = self.dependents.iter().copied().collect::<Vec<_>>();
-        let mut visited = HashSet::new();
-        visited.insert(self.id);
-
-        while let Some(id) = stack.pop() {
-            visited.insert(id);
-            build_order.push(id);
-
-            let node = self.get_node(txn, &id);
-            let unvisited_dependents = node.dependents.iter().filter(|id| !visited.contains(id));
-            stack.extend(unvisited_dependents);
-        }
-
-        build_order
-    }
 }
 
 impl SideEffectHandleApi for CapsuleManager {
     fn rebuilder(&self) -> Box<dyn Fn() + Sync + Send> {
-        (self.self_rebuilder)(self)
+        (self.create_rebuilder)(self)
     }
 }
 
-struct CapsuleReaderImpl<'man, 'txn_scope, 'txn_total, C: Capsule + 'static> {
-    manager: &'man RefCell<&'man mut CapsuleManager>,
-    txn: &'txn_scope mut ContainerWriteTxn<'txn_total>,
+struct CapsuleReaderImpl<'txn_scope, 'txn_total, C: Capsule + 'static> {
+    txn: &'txn_scope RefCell<&'txn_scope mut ContainerWriteTxn<'txn_total>>,
     ghost: PhantomData<C::T>,
 }
-impl<'man, 'txn_scope, 'txn_total, C: Capsule + 'static> CapsuleReader<C::T>
-    for CapsuleReaderImpl<'man, 'txn_scope, 'txn_total, C>
+impl<'txn_scope, 'txn_total, C: Capsule + 'static> CapsuleReader<C::T>
+    for CapsuleReaderImpl<'txn_scope, 'txn_total, C>
 {
     fn read<O: Capsule + 'static>(&mut self) -> Arc<O::T> {
-        let this_type = TypeId::of::<C>();
-        let other_type = TypeId::of::<O>();
-
-        if this_type == other_type {
+        let (this, other) = (TypeId::of::<C>(), TypeId::of::<O>());
+        if this == other {
             panic!(concat!(
                 "A capsule tried depending upon itself (which isn't allowed)! ",
                 "To read the current value of a capsule, instead use CapsuleReader::read_self()."
@@ -434,38 +392,38 @@ impl<'man, 'txn_scope, 'txn_total, C: Capsule + 'static> CapsuleReader<C::T>
         }
 
         // Get the value (and make sure the other manager is initialized!)
-        let data = self.txn.read_or_init::<O>();
+        let mut txn = self.txn.borrow_mut();
+        let data = txn.read_or_init::<O>();
 
         // Take care of some dependency housekeeping
-        self.txn
-            .nodes
-            .get_mut(&other_type)
-            .expect("Node should be initialized from read_or_init above")
-            .dependents
-            .insert(this_type);
-        self.manager.borrow_mut().dependencies.insert(other_type);
+        txn.node_or_panic(&other).dependents.insert(this);
+        txn.node_or_panic(&this).dependencies.insert(other);
 
         data
     }
 
     fn read_self(&self) -> Option<Arc<C::T>> {
-        self.txn.try_read::<C>()
+        self.txn.borrow().try_read::<C>()
     }
 }
 
-struct CapsuleSideEffectHandleImpl<'man> {
-    manager: &'man RefCell<&'man mut CapsuleManager>,
+struct CapsuleSideEffectHandleImpl<'txn_scope, 'txn_total> {
+    id: TypeId,
+    txn: &'txn_scope RefCell<&'txn_scope mut ContainerWriteTxn<'txn_total>>,
     index: u16,
 }
-impl<'man> SideEffectHandle for CapsuleSideEffectHandleImpl<'man> {
+impl<'txn_scope, 'txn_total> SideEffectHandle
+    for CapsuleSideEffectHandleImpl<'txn_scope, 'txn_total>
+{
     type Api = CapsuleManager;
     fn register_side_effect<R: Sync + Send + 'static>(
         &mut self,
         side_effect: impl FnOnce(&mut Self::Api) -> R,
     ) -> Arc<R> {
-        let mut manager = self.manager.borrow_mut();
+        let mut txn = self.txn.borrow_mut();
+        let manager = txn.node_or_panic(&self.id);
         if self.index as usize == manager.side_effect_data.len() {
-            let data = side_effect(*manager);
+            let data = side_effect(manager);
             manager.side_effect_data.push(Arc::new(data));
         };
         let data = manager.side_effect_data[self.index as usize].clone();
