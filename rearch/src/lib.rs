@@ -255,11 +255,11 @@ impl<'a> ContainerWriteTxn<'a> {
 
     fn build_single_node(&mut self, id: &TypeId) {
         // Remove old dependency info since it will change on this build
-        // We use std::mem::replace below to prevent needing a clone on the existing dependencies
+        // We use std::mem::take below to prevent needing a clone on the existing dependencies
         let node = self.node_or_panic(id);
-        let old_deps = std::mem::replace(&mut node.dependencies, HashSet::new());
+        let old_deps = std::mem::take(&mut node.dependencies);
         old_deps.iter().for_each(|dep| {
-            self.node_or_panic(dep).dependents.remove(&id);
+            self.node_or_panic(dep).dependents.remove(id);
         });
 
         // Trigger the build (which also populates its new dependencies in self)
@@ -300,7 +300,7 @@ impl<'a> ContainerWriteTxn<'a> {
                 if is_disposable {
                     let node = self.nodes.remove(id).expect("Node should be in graph");
                     node.dependencies.iter().for_each(|dep| {
-                        self.node_or_panic(&dep).dependents.remove(id);
+                        self.node_or_panic(dep).dependents.remove(id);
                     });
                     self.data.remove(id);
                 }
