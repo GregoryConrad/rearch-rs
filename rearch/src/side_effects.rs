@@ -256,7 +256,85 @@ pub trait BuiltinSideEffects {
         self.reducer_from_fn(reducer, || initial_state)
     }
 
-    // TODO self.mutation
+    fn rebuildless_nonce(&mut self) -> (u16, impl Fn() + Send + Sync + Clone + 'static) {
+        let (nonce, set_nonce) = self.rebuildless_state(|| 0u16);
+        (*nonce, move || set_nonce(nonce.overflowing_add(1).0))
+    }
+
+    #[cfg(feature = "tokio-side-effects")]
+    fn mutation<T, Mutation, Future>(
+        &mut self,
+        mutation: Mutation,
+    ) -> (
+        AsyncMutationState<T>,
+        impl Fn() + Send + Sync + Clone + 'static,
+        impl Fn() + Send + Sync + Clone + 'static,
+    )
+    where
+        T: Send + Sync + 'static,
+        Mutation: FnOnce() -> Future + Send + 'static,
+        Future: std::future::Future<Output = T> + Send + 'static,
+    {
+        let (state, set_state) = self.rebuildless_state(|| AsyncMutationState::Idle(None));
+        let (nonce, increment_nonce) = self.rebuildless_nonce();
+        let (active, set_active) = {
+            let (active, set_active) = self.rebuildless_state(|| false);
+            (*active, set_active)
+        };
+
+        let curr_data = state.data();
+        if !active {
+            set_state(AsyncMutationState::Idle(curr_data.clone()));
+        }
+
+        let rebuild = self.rebuilder();
+        self.effect(
+            || {
+                let handle = active.then(move || {
+                    set_state(AsyncMutationState::Loading(curr_data));
+                    tokio::task::spawn(async move {
+                        let data = mutation().await;
+                        rebuild(move || {
+                            set_state(AsyncMutationState::Complete(Arc::new(data)));
+                        });
+                    })
+                });
+
+                move || {
+                    if let Some(handle) = handle {
+                        handle.abort()
+                    }
+                }
+            },
+            (nonce, active),
+        );
+
+        let rebuild = self.rebuilder();
+        let mutate = {
+            let set_active = set_active.clone();
+            let increment_nonce = increment_nonce.clone();
+            move || {
+                let set_active = set_active.clone();
+                let increment_nonce = increment_nonce.clone();
+                rebuild(move || {
+                    set_active(true);
+                    increment_nonce();
+                })
+            }
+        };
+
+        let rebuild = self.rebuilder();
+        let clear = move || {
+            let set_active = set_active.clone();
+            let increment_nonce = increment_nonce.clone();
+            rebuild(move || {
+                set_active(false);
+                increment_nonce();
+            })
+        };
+
+        (state.as_ref().clone(), mutate, clear)
+    }
 }
 
 impl<Handle: SideEffectHandle> BuiltinSideEffects for Handle {
@@ -284,8 +362,8 @@ mod async_state {
     impl<T> AsyncState<T> {
         pub fn data(&self) -> Option<Arc<T>> {
             match self {
-                AsyncState::Loading(previous) => previous.clone(),
-                AsyncState::Complete(data) => Some(data.clone()),
+                Self::Loading(previous_data) => previous_data.clone(),
+                Self::Complete(data) => Some(data.clone()),
             }
         }
     }
@@ -293,8 +371,34 @@ mod async_state {
     impl<T> Clone for AsyncState<T> {
         fn clone(&self) -> Self {
             match self {
-                AsyncState::Loading(previous_data) => AsyncState::Loading(previous_data.clone()),
-                AsyncState::Complete(data) => AsyncState::Complete(data.clone()),
+                Self::Loading(previous_data) => Self::Loading(previous_data.clone()),
+                Self::Complete(data) => Self::Complete(data.clone()),
+            }
+        }
+    }
+
+    pub enum AsyncMutationState<T> {
+        Idle(Option<Arc<T>>),
+        Loading(Option<Arc<T>>),
+        Complete(Arc<T>),
+    }
+
+    impl<T> AsyncMutationState<T> {
+        pub fn data(&self) -> Option<Arc<T>> {
+            match self {
+                Self::Idle(previous_data) => previous_data.clone(),
+                Self::Loading(previous_data) => previous_data.clone(),
+                Self::Complete(data) => Some(data.clone()),
+            }
+        }
+    }
+
+    impl<T> Clone for AsyncMutationState<T> {
+        fn clone(&self) -> Self {
+            match self {
+                Self::Idle(previous_data) => Self::Idle(previous_data.clone()),
+                Self::Loading(previous_data) => Self::Loading(previous_data.clone()),
+                Self::Complete(data) => Self::Complete(data.clone()),
             }
         }
     }
