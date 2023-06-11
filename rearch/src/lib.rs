@@ -55,7 +55,7 @@ macro_rules! read {
 pub trait Capsule {
     /// The type of data associated with this capsule.
     // Associated type so that Capsule can only ever be implemented once for each concrete type
-    type T: 'static + Sync + Send;
+    type T: 'static + Send + Sync;
 
     /// Builds the capsule's immutable data using a given snapshot of the data flow graph.
     /// (The snapshot, a ContainerWriteTxn, is abstracted away for you.)
@@ -74,13 +74,13 @@ pub trait CapsuleReader<T> {
 }
 
 pub trait SideEffectHandle {
-    type Api: SideEffectHandleApi;
+    type Api: SideEffectHandleApi + 'static;
 
     // Registers the given side effect by initializing it on the first build and then returning
     // that same value on every subsequent build.
     // This allows you to store private mutable data that can be accessed on subsequent builds
     // in a deterministic way.
-    fn register_side_effect<R: Sync + Send + 'static>(
+    fn register_side_effect<R: Send + Sync + 'static>(
         &mut self,
         side_effect: impl FnOnce(&mut Self::Api) -> R,
     ) -> Arc<R>;
@@ -88,7 +88,7 @@ pub trait SideEffectHandle {
 
 pub trait SideEffectHandleApi {
     /// Provides a mechanism to trigger rebuilds.
-    fn rebuilder(&self) -> Box<dyn Fn() + Sync + Send>;
+    fn rebuilder<RebuildMutation: FnOnce()>(&self) -> impl Fn(RebuildMutation) + Send + Sync;
 }
 
 /// Containers store the current data within and the state of the data flow graph
@@ -139,7 +139,7 @@ impl Container {
 /// Keys for both are simply the `TypeId` of capsules, like `TypeId::of::<SomeCapsule>()`.
 #[derive(Default)]
 struct ContainerStore {
-    data: concread::hashmap::HashMap<TypeId, Arc<dyn Any + Sync + Send>>,
+    data: concread::hashmap::HashMap<TypeId, Arc<dyn Any + Send + Sync>>,
     nodes: Mutex<std::collections::HashMap<TypeId, CapsuleManager>>,
 }
 impl ContainerStore {
@@ -175,9 +175,14 @@ impl ContainerStore {
 #[derive(Clone)]
 struct CapsuleRebuilder(Weak<ContainerStore>);
 impl CapsuleRebuilder {
-    fn rebuild<C: Capsule + 'static>(&self) {
+    fn rebuild(&self, id: TypeId, mutation: impl FnOnce()) {
         if let Some(store) = self.0.upgrade() {
-            store.with_write_txn(self.clone(), |txn| txn.build_capsule::<C>());
+            store.with_write_txn(self.clone(), |txn| {
+                // We have the txn now, so that means we also hold the data & nodes lock.
+                // Thus, this is where we should run the supplied mutation.
+                mutation();
+                txn.rebuild_capsule_or_panic(id);
+            });
         } else {
             // TODO log that C attempted to rebuild itself after container disposal
         }
@@ -185,7 +190,7 @@ impl CapsuleRebuilder {
 }
 
 pub struct ContainerReadTxn<'a> {
-    data: HashMapReadTxn<'a, TypeId, Arc<dyn Any + Sync + Send>>,
+    data: HashMapReadTxn<'a, TypeId, Arc<dyn Any + Send + Sync>>,
 }
 impl<'a> ContainerReadTxn<'a> {
     pub fn try_read<C: Capsule + 'static>(&self) -> Option<Arc<C::T>> {
@@ -199,7 +204,7 @@ impl<'a> ContainerReadTxn<'a> {
 }
 
 pub struct ContainerWriteTxn<'a> {
-    data: HashMapWriteTxn<'a, TypeId, Arc<dyn Any + Sync + Send>>,
+    data: HashMapWriteTxn<'a, TypeId, Arc<dyn Any + Send + Sync>>,
     nodes: &'a mut std::collections::HashMap<TypeId, CapsuleManager>,
     rebuilder: CapsuleRebuilder,
 }
@@ -234,13 +239,21 @@ impl<'a> ContainerWriteTxn<'a> {
     fn build_capsule<C: Capsule + 'static>(&mut self) {
         let id = TypeId::of::<C>();
 
+        // Ensure this capsule has a node for it in the graph
         self.nodes
             .entry(id)
             .or_insert_with(|| CapsuleManager::new::<C>(self.rebuilder.clone()));
+
+        self.rebuild_capsule_or_panic(id);
+    }
+
+    /// Forcefully rebuild the capsule with the supplied id.
+    /// Panics if the node with id is not in the graph, so this is only safe for rebuilds
+    fn rebuild_capsule_or_panic(&mut self, id: TypeId) {
         self.build_single_node(&id);
 
-        // Since we have already built node above (since *it must be built in this method*),
-        // we can skip it with skip(1) when we handling the rest of the dependent subgraph
+        // Since we have already built the node above (since *it must be built in this method*),
+        // we can skip it with skip(1) when we are handling the rest of the dependent subgraph
         let build_order = self.create_build_order(id).into_iter().skip(1);
         let build_order = self.garbage_collect_super_pure_nodes(build_order);
         build_order.iter().for_each(|id| self.build_single_node(id));
@@ -314,35 +327,28 @@ impl<'a> ContainerWriteTxn<'a> {
 // This struct is completely typeless in order to avoid *a lot* of dynamic dispatch
 // that we used to have when dealing with the graph nodes.
 // We avoid needing types by:
-// - Storing a function pointer that performs the actual build,
-// - Storing a function pointer that can create rebuilders
+// - Storing our capsule's TypeId directly so that we can trigger rebuilds of our capsule
+// - Storing a function pointer that performs the actual build
 // Those are the only type-specific behaviors!
 struct CapsuleManager {
+    id: TypeId,
     dependencies: HashSet<TypeId>,
     dependents: HashSet<TypeId>,
-    side_effect_data: Vec<Arc<dyn Any + Sync + Send>>,
-    capsule_rebuilder: CapsuleRebuilder,
-    create_rebuilder: fn(&CapsuleManager) -> Box<dyn Fn() + Sync + Send>,
+    side_effect_data: Vec<Arc<dyn Any + Send + Sync>>,
+    rebuilder: CapsuleRebuilder,
     build: fn(&mut ContainerWriteTxn),
 }
 
 impl CapsuleManager {
     fn new<C: Capsule + 'static>(rebuilder: CapsuleRebuilder) -> Self {
         CapsuleManager {
+            id: TypeId::of::<C>(),
             dependencies: HashSet::new(),
             dependents: HashSet::new(),
             side_effect_data: Vec::new(),
-            capsule_rebuilder: rebuilder,
+            rebuilder,
             build: Self::build::<C>,
-            create_rebuilder: Self::create_rebuilder::<C>,
         }
-    }
-
-    fn create_rebuilder<C: Capsule + 'static>(
-        manager: &CapsuleManager,
-    ) -> Box<dyn Fn() + Send + Sync> {
-        let rebuilder = manager.capsule_rebuilder.clone();
-        Box::new(move || rebuilder.rebuild::<C>())
     }
 
     fn build<C: Capsule + 'static>(txn: &mut ContainerWriteTxn) {
@@ -370,8 +376,10 @@ impl CapsuleManager {
 }
 
 impl SideEffectHandleApi for CapsuleManager {
-    fn rebuilder(&self) -> Box<dyn Fn() + Sync + Send> {
-        (self.create_rebuilder)(self)
+    fn rebuilder<RebuildMutation: FnOnce()>(&self) -> impl Fn(RebuildMutation) + Send + Sync {
+        let id = self.id;
+        let rebuilder = self.rebuilder.clone();
+        move |mutation| rebuilder.rebuild(id, mutation)
     }
 }
 
@@ -416,7 +424,7 @@ impl<'txn_scope, 'txn_total> SideEffectHandle
     for CapsuleSideEffectHandleImpl<'txn_scope, 'txn_total>
 {
     type Api = CapsuleManager;
-    fn register_side_effect<R: Sync + Send + 'static>(
+    fn register_side_effect<R: Send + Sync + 'static>(
         &mut self,
         side_effect: impl FnOnce(&mut Self::Api) -> R,
     ) -> Arc<R> {
@@ -438,11 +446,11 @@ impl<'txn_scope, 'txn_total> SideEffectHandle
 #[cfg(test)]
 mod tests {
 
-    /// Check for Container: Sync + Send
+    /// Check for Container: Send + Sync
     #[allow(unused)]
     mod container_thread_safe {
         use crate::*;
-        struct SyncSendCheck<T: Sync + Send>(T);
+        struct SyncSendCheck<T: Send + Sync>(T);
         fn foo(bar: SyncSendCheck<Container>) {}
     }
 
@@ -536,7 +544,7 @@ mod tests {
 
         struct StateCapsule;
         impl Capsule for StateCapsule {
-            type T = (u8, Box<dyn Fn(u8) + Sync + Send>);
+            type T = (u8, Box<dyn Fn(u8) + Send + Sync>);
 
             fn build(
                 _: &mut impl CapsuleReader<Self::T>,
