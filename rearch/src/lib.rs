@@ -91,9 +91,9 @@ pub trait SideEffectHandleApi {
     fn rebuilder<RebuildMutation: FnOnce()>(&self) -> impl Fn(RebuildMutation) + Send + Sync;
 }
 
-/// Containers store the current data within and the state of the data flow graph
-/// created by capsules and their dependencies/dependents.
-/// To read data from the container, it is suggested that you use the `read!()` macro.
+/// Containers store the current data and state of the data flow graph created by capsules
+/// and their dependencies/dependents.
+/// To read data from the container, it is highly suggested that you use the `read!()` macro.
 /// See the README for more.
 #[derive(Clone, Default)]
 pub struct Container(Arc<ContainerStore>);
@@ -181,7 +181,11 @@ impl CapsuleRebuilder {
                 // We have the txn now, so that means we also hold the data & nodes lock.
                 // Thus, this is where we should run the supplied mutation.
                 mutation();
-                txn.rebuild_capsule_or_panic(id);
+
+                // The node is guaranteed to be in the graph since this is a rebuild.
+                // (To trigger a rebuild, a capsule must have used its side effect handle,
+                // and using the side effect handle prevents the super pure gc.)
+                txn.build_capsule_or_panic(id);
             });
         } else {
             // TODO log that C attempted to rebuild itself after container disposal
@@ -194,8 +198,8 @@ pub struct ContainerReadTxn<'a> {
 }
 impl<'a> ContainerReadTxn<'a> {
     pub fn try_read<C: Capsule + 'static>(&self) -> Option<Arc<C::T>> {
-        let capsule_type = TypeId::of::<C>();
-        self.data.get(&capsule_type).map(|data| {
+        let id = TypeId::of::<C>();
+        self.data.get(&id).map(|data| {
             data.clone()
                 .downcast::<C::T>()
                 .expect("Types should be properly enforced due to generics")
@@ -210,8 +214,8 @@ pub struct ContainerWriteTxn<'a> {
 }
 impl<'a> ContainerWriteTxn<'a> {
     pub fn try_read<C: Capsule + 'static>(&self) -> Option<Arc<C::T>> {
-        let capsule_type = TypeId::of::<C>();
-        self.data.get(&capsule_type).map(|data| {
+        let id = TypeId::of::<C>();
+        self.data.get(&id).map(|data| {
             data.clone()
                 .downcast::<C::T>()
                 .expect("Types should be properly enforced due to generics")
@@ -219,23 +223,17 @@ impl<'a> ContainerWriteTxn<'a> {
     }
 
     pub fn read_or_init<C: Capsule + 'static>(&mut self) -> Arc<C::T> {
-        let capsule_type = TypeId::of::<C>();
-
-        if !self.data.contains_key(&capsule_type) {
+        let id = TypeId::of::<C>();
+        if !self.data.contains_key(&id) {
             self.build_capsule::<C>();
         }
-
-        self.data
-            .get(&capsule_type)
+        self.try_read::<C>()
             .expect("Data should be present due to checking/building capsule above")
-            .clone()
-            .downcast::<C::T>()
-            .expect("Types should be properly enforced due to generics")
     }
 }
 
 impl<'a> ContainerWriteTxn<'a> {
-    /// Forcefully triggers a first build or rebuild for the supplied capsule
+    /// Triggers a first build or rebuild for the supplied capsule
     fn build_capsule<C: Capsule + 'static>(&mut self) {
         let id = TypeId::of::<C>();
 
@@ -244,18 +242,17 @@ impl<'a> ContainerWriteTxn<'a> {
             .entry(id)
             .or_insert_with(|| CapsuleManager::new::<C>(self.rebuilder.clone()));
 
-        self.rebuild_capsule_or_panic(id);
+        self.build_capsule_or_panic(id);
     }
 
-    /// Forcefully rebuild the capsule with the supplied id.
-    /// Panics if the node with id is not in the graph, so this is only safe for rebuilds
-    fn rebuild_capsule_or_panic(&mut self, id: TypeId) {
+    /// Forcefully builds the capsule with the supplied id. Panics if node is not in the graph
+    fn build_capsule_or_panic(&mut self, id: TypeId) {
         self.build_single_node(&id);
 
         // Since we have already built the node above (since *it must be built in this method*),
         // we can skip it with skip(1) when we are handling the rest of the dependent subgraph
-        let build_order = self.create_build_order(id).into_iter().skip(1);
-        let build_order = self.garbage_collect_super_pure_nodes(build_order);
+        let build_order = self.create_build_order_stack(id).into_iter().rev().skip(1);
+        let build_order = self.garbage_collect_diposable_nodes(build_order);
         build_order.iter().for_each(|id| self.build_single_node(id));
     }
 
@@ -266,8 +263,9 @@ impl<'a> ContainerWriteTxn<'a> {
             .expect("Requested node should be in the graph")
     }
 
+    /// Builds only the requested node. Panics if node is not in the graph
     fn build_single_node(&mut self, id: &TypeId) {
-        // Remove old dependency info since it will change on this build
+        // Remove old dependency info since it may change on this build
         // We use std::mem::take below to prevent needing a clone on the existing dependencies
         let node = self.node_or_panic(id);
         let old_deps = std::mem::take(&mut node.dependencies);
@@ -279,30 +277,38 @@ impl<'a> ContainerWriteTxn<'a> {
         (self.node_or_panic(id).build)(self);
     }
 
-    /// Function that creates this node's dependent subgraph build order (with self)
-    fn create_build_order(&mut self, start: TypeId) -> Vec<TypeId> {
-        let mut build_order = Vec::new();
-        let mut stack = vec![start];
+    /// Creates the start node's dependent subgraph build order, including start, *as a stack*
+    /// Thus, proper iteration order is done by popping off of the stack (in reverse order)!
+    fn create_build_order_stack(&mut self, start: TypeId) -> Vec<TypeId> {
+        let mut build_order_stack = Vec::new();
+        let mut to_visit_stack = vec![start];
         let mut visited = HashSet::new();
 
-        while let Some(id) = stack.pop() {
-            visited.insert(id);
-            build_order.push(id);
-
-            self.node_or_panic(&id)
-                .dependents
-                .iter()
-                .copied()
-                .filter(|dep| !visited.contains(dep))
-                .for_each(|dep| stack.push(dep));
+        while let Some(node) = to_visit_stack.pop() {
+            if !visited.contains(&node) {
+                visited.insert(node);
+                to_visit_stack.push(node); // mark node to be added to build order later
+                self.node_or_panic(&node)
+                    .dependents
+                    .iter()
+                    .copied()
+                    .filter(|dep| !visited.contains(dep))
+                    .for_each(|dep| to_visit_stack.push(dep));
+            } else {
+                build_order_stack.push(node);
+            }
         }
 
-        build_order
+        build_order_stack
     }
 
     /// Helper function that given a build_order, garbage collects all super pure nodes
-    /// and returns the new build order without the (now garbage collected) super pure nodes
-    fn garbage_collect_super_pure_nodes(
+    /// that have no dependents (i.e., they are entirely disposable)
+    /// and returns the new build order without the (now garbage collected) super pure nodes.
+    /// While the build order specifies the order in which nodes must be built in to propagate
+    /// updates, the reverse of the build order specifies the order in which we can trim down
+    /// some fat through gc.
+    fn garbage_collect_diposable_nodes(
         &mut self,
         build_order: impl DoubleEndedIterator<Item = TypeId>,
     ) -> Vec<TypeId> {
@@ -360,11 +366,7 @@ impl CapsuleManager {
                 txn,
                 ghost: PhantomData,
             },
-            &mut CapsuleSideEffectHandleImpl {
-                id: TypeId::of::<C>(),
-                txn,
-                index: 0,
-            },
+            &mut CapsuleSideEffectHandleImpl { id, txn, index: 0 },
         );
         txn.borrow_mut().data.insert(id, Arc::new(new_data));
     }
