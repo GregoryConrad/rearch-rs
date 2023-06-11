@@ -385,7 +385,7 @@ impl SideEffectHandleApi for CapsuleManager {
 
 struct CapsuleReaderImpl<'txn_scope, 'txn_total, C: Capsule + 'static> {
     txn: &'txn_scope RefCell<&'txn_scope mut ContainerWriteTxn<'txn_total>>,
-    ghost: PhantomData<C::T>,
+    ghost: PhantomData<C::T>, // phantom with C::T to prevent needing C to be Send + Sync
 }
 impl<'txn_scope, 'txn_total, C: Capsule + 'static> CapsuleReader<C::T>
     for CapsuleReaderImpl<'txn_scope, 'txn_total, C>

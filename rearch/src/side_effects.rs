@@ -225,7 +225,38 @@ pub trait BuiltinSideEffects {
         (state, persist)
     }
 
-    // TODO self.mutation and self.reducer
+    fn reducer_from_fn<State, Action, Reducer>(
+        &mut self,
+        reducer: Reducer,
+        initial_state: impl FnOnce() -> State,
+    ) -> (Arc<State>, impl Fn(Action) + Send + Sync + 'static)
+    where
+        State: Send + Sync + 'static,
+        Reducer: Fn(&State, Action) -> State + Send + Sync + 'static,
+    {
+        let (state, set_state) = self.state_from_fn(initial_state);
+        let dispatch = {
+            let state = state.clone();
+            move |action| {
+                set_state(reducer(&state, action));
+            }
+        };
+        (state, dispatch)
+    }
+
+    fn reducer<State, Action, Reducer>(
+        &mut self,
+        reducer: Reducer,
+        initial_state: State,
+    ) -> (Arc<State>, impl Fn(Action) + Send + Sync + 'static)
+    where
+        State: Send + Sync + 'static,
+        Reducer: Fn(&State, Action) -> State + Send + Sync + 'static,
+    {
+        self.reducer_from_fn(reducer, || initial_state)
+    }
+
+    // TODO self.mutation
 }
 
 impl<Handle: SideEffectHandle> BuiltinSideEffects for Handle {
