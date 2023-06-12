@@ -280,22 +280,27 @@ impl<'a> ContainerWriteTxn<'a> {
     /// Creates the start node's dependent subgraph build order, including start, *as a stack*
     /// Thus, proper iteration order is done by popping off of the stack (in reverse order)!
     fn create_build_order_stack(&mut self, start: TypeId) -> Vec<TypeId> {
-        let mut build_order_stack = Vec::new();
-        let mut to_visit_stack = vec![start];
+        // We need some more information alongside each node in order to do the topological sort
+        // - False is for the first visit, which adds all deps to be visited and then self again
+        // - True is for the second visit, which pushes node to the build order
+        let mut to_visit_stack = vec![(false, start)];
         let mut visited = HashSet::new();
+        let mut build_order_stack = Vec::new();
 
-        while let Some(node) = to_visit_stack.pop() {
-            if !visited.contains(&node) {
+        while let Some((has_visited_before, node)) = to_visit_stack.pop() {
+            if has_visited_before {
+                // Already processed this node's dependents, so finally add to build order
+                build_order_stack.push(node);
+            } else if !visited.contains(&node) {
+                // New node, so mark this node to be added later and process dependents
                 visited.insert(node);
-                to_visit_stack.push(node); // mark node to be added to build order later
+                to_visit_stack.push((true, node)); // mark node to be added to build order later
                 self.node_or_panic(&node)
                     .dependents
                     .iter()
                     .copied()
                     .filter(|dep| !visited.contains(dep))
-                    .for_each(|dep| to_visit_stack.push(dep));
-            } else {
-                build_order_stack.push(node);
+                    .for_each(|dep| to_visit_stack.push((false, dep)));
             }
         }
 
