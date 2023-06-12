@@ -13,7 +13,7 @@ pub fn capsule(_attr: TokenStream, item: TokenStream) -> TokenStream {
         // A dependency capsule
         // TODO allow an Option<&Self::T> for reader.read_self()!!
         syn::Type::Path(syn::TypePath { path, .. }) => {
-            quote! { #path(reader.read::<#path>().as_ref()) }
+            quote! { #path(&reader.read::<#path>()) }
         }
         // The side effect handle
         syn::Type::Reference(_) => quote! { handle },
@@ -67,9 +67,9 @@ pub fn factory(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let factory_type = {
         match factory_params {
             Some(ref factory_params) => {
-                quote! { Box<dyn Fn(#factory_params) -> #fn_type + Sync + Send> }
+                quote! { std::sync::Arc<dyn Fn(#factory_params) -> #fn_type + Sync + Send> }
             }
-            None => quote! { Box<dyn Fn() -> #fn_type + Sync + Send> },
+            None => quote! { std::sync::Arc<dyn Fn() -> #fn_type + Sync + Send> },
         }
     };
     let factory_args = {
@@ -93,7 +93,7 @@ pub fn factory(_attr: TokenStream, item: TokenStream) -> TokenStream {
         syn::Type::Path(syn::TypePath { path, .. }) => {
             let local_var_name = format_ident!("capsule_var{capsule_count}");
             capsule_count += 1;
-            quote! { #path(#local_var_name.as_ref()) }
+            quote! { #path(&#local_var_name) }
         }
         // The side effect handle
         syn::Type::Reference(_) => quote! { handle },
@@ -124,7 +124,7 @@ pub fn factory(_attr: TokenStream, item: TokenStream) -> TokenStream {
                 handle: &mut impl rearch::SideEffectHandle) -> Self::T {
                 #(let #local_capsule_vars = reader.read::<#dependencies>();)*
 
-                Box::new(move |#factory_args| #fn_name(#(#args),*))
+                std::sync::Arc::new(move |#factory_args| #fn_name(#(#args),*))
             }
         }
     };

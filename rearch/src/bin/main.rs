@@ -34,9 +34,9 @@ fn uses_factory(BigStringFactory(factory): BigStringFactory) -> String {
 }
 
 #[capsule]
-fn stateful(handle: &mut impl SideEffectHandle) -> (u8, Box<dyn Fn(u8) + Sync + Send>) {
+fn stateful(handle: &mut impl SideEffectHandle) -> (u8, std::sync::Arc<dyn Fn(u8) + Sync + Send>) {
     let (state, set_state) = handle.state(0u8);
-    (*state, Box::new(set_state))
+    (*state, std::sync::Arc::new(set_state))
 }
 
 fn main() {
@@ -45,10 +45,10 @@ fn main() {
     let uses_factory = rearch::read!(container, UsesFactoryCapsule);
     println!("{uses_factory}");
 
-    let (state, set_state) = &*rearch::read!(container, StatefulCapsule);
+    let (state, set_state) = rearch::read!(container, StatefulCapsule);
     println!("{state}");
     set_state(1);
 
-    let (state, _) = &*rearch::read!(container, StatefulCapsule);
+    let (state, _) = rearch::read!(container, StatefulCapsule);
     println!("{state}");
 }

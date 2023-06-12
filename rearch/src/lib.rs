@@ -1,5 +1,6 @@
 #![feature(return_position_impl_trait_in_trait)]
 use concread::hashmap::{HashMapReadTxn, HashMapWriteTxn};
+use dyn_clone::DynClone;
 use std::{
     any::{Any, TypeId},
     cell::RefCell,
@@ -30,7 +31,6 @@ pub use side_effects::*;
 /// Internally, tries to read all supplied capsules with a read transaction first (cheap),
 /// but if that fails (i.e., capsules' data not present in the container),
 /// read!() spins up a write txn and initializes all needed capsules (which blocks).
-/// TODO name this arc_read! and then add a read! attribute macro in other crate that returns refs
 #[macro_export]
 macro_rules! read {
     ($container:expr, $($C:ident),+) => {
@@ -55,7 +55,7 @@ macro_rules! read {
 pub trait Capsule {
     /// The type of data associated with this capsule.
     // Associated type so that Capsule can only ever be implemented once for each concrete type
-    type T: 'static + Send + Sync;
+    type T: Clone + Send + Sync + 'static;
 
     /// Builds the capsule's immutable data using a given snapshot of the data flow graph.
     /// (The snapshot, a ContainerWriteTxn, is abstracted away for you.)
@@ -69,8 +69,8 @@ pub trait Capsule {
 }
 
 pub trait CapsuleReader<T> {
-    fn read<O: Capsule + 'static>(&mut self) -> Arc<O::T>;
-    fn read_self(&self) -> Option<Arc<T>>;
+    fn read<O: Capsule + 'static>(&mut self) -> O::T;
+    fn read_self(&self) -> Option<T>;
 }
 
 pub trait SideEffectHandle {
@@ -139,7 +139,7 @@ impl Container {
 /// Keys for both are simply the `TypeId` of capsules, like `TypeId::of::<SomeCapsule>()`.
 #[derive(Default)]
 struct ContainerStore {
-    data: concread::hashmap::HashMap<TypeId, Arc<dyn Any + Send + Sync>>,
+    data: concread::hashmap::HashMap<TypeId, Box<dyn DynClone + Send + Sync>>,
     nodes: Mutex<std::collections::HashMap<TypeId, CapsuleManager>>,
 }
 impl ContainerStore {
@@ -194,35 +194,51 @@ impl CapsuleRebuilder {
 }
 
 pub struct ContainerReadTxn<'a> {
-    data: HashMapReadTxn<'a, TypeId, Arc<dyn Any + Send + Sync>>,
+    data: HashMapReadTxn<'a, TypeId, Box<dyn DynClone + Send + Sync>>,
 }
 impl<'a> ContainerReadTxn<'a> {
-    pub fn try_read<C: Capsule + 'static>(&self) -> Option<Arc<C::T>> {
+    pub fn try_read<C: Capsule + 'static>(&self) -> Option<C::T> {
         let id = TypeId::of::<C>();
         self.data.get(&id).map(|data| {
-            data.clone()
-                .downcast::<C::T>()
-                .expect("Types should be properly enforced due to generics")
+            let data: Box<dyn DynClone + Send + Sync> = dyn_clone::clone_box(data.as_ref());
+            // SAFETY: The Box is a C::T because it is enforced via generics.
+            // For some reason with dyn_clone, Any's downcasts to C::T were failing.
+            // TODO This is something to look into as I would prefer to not use unsafe Rust,
+            // even if it is perfectly safe like in this case.
+            // Maybe file an issue over at dyn_clone asking about why
+            // Box<DynClone> -> Any -> downcast_ref::<Box<ActualType>>() fails?
+            unsafe {
+                let ptr = Box::into_raw(data) as *mut C::T;
+                *Box::from_raw(ptr)
+            }
         })
     }
 }
 
 pub struct ContainerWriteTxn<'a> {
-    data: HashMapWriteTxn<'a, TypeId, Arc<dyn Any + Send + Sync>>,
+    data: HashMapWriteTxn<'a, TypeId, Box<dyn DynClone + Send + Sync>>,
     nodes: &'a mut std::collections::HashMap<TypeId, CapsuleManager>,
     rebuilder: CapsuleRebuilder,
 }
 impl<'a> ContainerWriteTxn<'a> {
-    pub fn try_read<C: Capsule + 'static>(&self) -> Option<Arc<C::T>> {
+    pub fn try_read<C: Capsule + 'static>(&self) -> Option<C::T> {
         let id = TypeId::of::<C>();
         self.data.get(&id).map(|data| {
-            data.clone()
-                .downcast::<C::T>()
-                .expect("Types should be properly enforced due to generics")
+            let data: Box<dyn DynClone + Send + Sync> = dyn_clone::clone_box(data.as_ref());
+            // SAFETY: The Box is a C::T because it is enforced via generics.
+            // For some reason with dyn_clone, Any's downcasts to C::T were failing.
+            // TODO This is something to look into as I would prefer to not use unsafe Rust,
+            // even if it is perfectly safe like in this case.
+            // Maybe file an issue over at dyn_clone asking about why
+            // Box<DynClone> -> Any -> downcast_ref::<Box<ActualType>>() fails?
+            unsafe {
+                let ptr = Box::into_raw(data) as *mut C::T;
+                *Box::from_raw(ptr)
+            }
         })
     }
 
-    pub fn read_or_init<C: Capsule + 'static>(&mut self) -> Arc<C::T> {
+    pub fn read_or_init<C: Capsule + 'static>(&mut self) -> C::T {
         let id = TypeId::of::<C>();
         if !self.data.contains_key(&id) {
             self.build_capsule::<C>();
@@ -374,7 +390,7 @@ impl CapsuleManager {
             },
             &mut CapsuleSideEffectHandleImpl { id, txn, index: 0 },
         );
-        txn.borrow_mut().data.insert(id, Arc::new(new_data));
+        txn.borrow_mut().data.insert(id, Box::new(new_data));
     }
 
     fn is_disposable(&self) -> bool {
@@ -398,7 +414,7 @@ struct CapsuleReaderImpl<'txn_scope, 'txn_total, C: Capsule + 'static> {
 impl<'txn_scope, 'txn_total, C: Capsule + 'static> CapsuleReader<C::T>
     for CapsuleReaderImpl<'txn_scope, 'txn_total, C>
 {
-    fn read<O: Capsule + 'static>(&mut self) -> Arc<O::T> {
+    fn read<O: Capsule + 'static>(&mut self) -> O::T {
         let (this, other) = (TypeId::of::<C>(), TypeId::of::<O>());
         if this == other {
             panic!(concat!(
@@ -418,7 +434,7 @@ impl<'txn_scope, 'txn_total, C: Capsule + 'static> CapsuleReader<C::T>
         data
     }
 
-    fn read_self(&self) -> Option<Arc<C::T>> {
+    fn read_self(&self) -> Option<C::T> {
         self.txn.borrow().try_read::<C>()
     }
 }
@@ -471,11 +487,11 @@ mod tests {
             let container = Container::new();
             assert_eq!(
                 1,
-                *container.with_write_txn(|txn| txn.read_or_init::<CountPlusOneCapsule>())
+                container.with_write_txn(|txn| txn.read_or_init::<CountPlusOneCapsule>())
             );
             assert_eq!(
                 0,
-                *container.with_read_txn(|txn| txn.try_read::<CountCapsule>().unwrap())
+                container.with_read_txn(|txn| txn.try_read::<CountCapsule>().unwrap())
             )
         }
 
@@ -483,14 +499,14 @@ mod tests {
         fn read_macro() {
             let container = Container::new();
             let (count, count_plus_one) = read!(container, CountCapsule, CountPlusOneCapsule);
-            assert_eq!(0, *count);
-            assert_eq!(1, *count_plus_one);
+            assert_eq!(0, count);
+            assert_eq!(1, count_plus_one);
 
             let count = read!(container, CountCapsule);
-            assert_eq!(0, *count);
+            assert_eq!(0, count);
 
             let count_plus_one = read!(&Container::new(), CountPlusOneCapsule);
-            assert_eq!(1, *count_plus_one);
+            assert_eq!(1, count_plus_one);
         }
 
         struct CountCapsule;
@@ -512,7 +528,7 @@ mod tests {
                 reader: &mut impl CapsuleReader<Self::T>,
                 _: &mut impl SideEffectHandle,
             ) -> Self::T {
-                reader.read::<CountCapsule>().as_ref() + 1
+                reader.read::<CountCapsule>() + 1
             }
         }
     }
@@ -523,43 +539,41 @@ mod tests {
         #[test]
         fn state_gets_updates() {
             let container = Container::new();
-            let (state, set_state) = &*read!(container, StateCapsule);
-            assert_eq!(&0, state);
+            let (state, set_state) = read!(container, StateCapsule);
+            assert_eq!(0, state);
             set_state(1);
-            let (state, set_state) = &*read!(container, StateCapsule);
-            assert_eq!(&1, state);
+            let (state, set_state) = read!(container, StateCapsule);
+            assert_eq!(1, state);
             set_state(2);
             set_state(3);
-            let (state, _) = &*read!(container, StateCapsule);
-            assert_eq!(&3, state);
+            let (state, _) = read!(container, StateCapsule);
+            assert_eq!(3, state);
         }
 
         #[test]
         fn dependent_gets_updates() {
             let container = Container::new();
 
-            let (state, plus_one) = read!(container, StateCapsule, DependentCapsule);
-            let (state, set_state) = &*state;
-            assert_eq!(&0, state);
-            assert_eq!(1, *plus_one);
+            let ((state, set_state), plus_one) = read!(container, StateCapsule, DependentCapsule);
+            assert_eq!(0, state);
+            assert_eq!(1, plus_one);
             set_state(1);
 
-            let (state, plus_one) = read!(container, StateCapsule, DependentCapsule);
-            let (state, _) = &*state;
-            assert_eq!(&1, state);
-            assert_eq!(2, *plus_one);
+            let ((state, _), plus_one) = read!(container, StateCapsule, DependentCapsule);
+            assert_eq!(1, state);
+            assert_eq!(2, plus_one);
         }
 
         struct StateCapsule;
         impl Capsule for StateCapsule {
-            type T = (u8, Box<dyn Fn(u8) + Send + Sync>);
+            type T = (u8, Arc<dyn Fn(u8) + Send + Sync>);
 
             fn build(
                 _: &mut impl CapsuleReader<Self::T>,
                 handle: &mut impl SideEffectHandle,
             ) -> Self::T {
                 let (state, set_state) = handle.state(0);
-                (*state, Box::new(set_state))
+                (*state, Arc::new(set_state))
             }
         }
 
@@ -578,6 +592,8 @@ mod tests {
 
     #[cfg(feature = "capsule-macro")]
     mod complex_dependency_graph {
+        use std::sync::Arc;
+
         use crate::{self as rearch, capsule, BuiltinSideEffects, Container, SideEffectHandle};
 
         // We use a more sophisticated graph here for a more thorough test of all functionality
@@ -595,14 +611,14 @@ mod tests {
             container.with_read_txn(|txn| {
                 read_txn_counter += 1;
                 assert!(txn.try_read::<StatefulACapsule>().is_none());
-                assert!(txn.try_read::<ACapsule>().is_none());
-                assert!(txn.try_read::<BCapsule>().is_none());
-                assert!(txn.try_read::<CCapsule>().is_none());
-                assert!(txn.try_read::<DCapsule>().is_none());
-                assert!(txn.try_read::<ECapsule>().is_none());
-                assert!(txn.try_read::<FCapsule>().is_none());
-                assert!(txn.try_read::<GCapsule>().is_none());
-                assert!(txn.try_read::<HCapsule>().is_none());
+                assert_eq!(txn.try_read::<ACapsule>(), None);
+                assert_eq!(txn.try_read::<BCapsule>(), None);
+                assert_eq!(txn.try_read::<CCapsule>(), None);
+                assert_eq!(txn.try_read::<DCapsule>(), None);
+                assert_eq!(txn.try_read::<ECapsule>(), None);
+                assert_eq!(txn.try_read::<FCapsule>(), None);
+                assert_eq!(txn.try_read::<GCapsule>(), None);
+                assert_eq!(txn.try_read::<HCapsule>(), None);
             });
 
             rearch::read!(container, DCapsule, GCapsule);
@@ -610,14 +626,14 @@ mod tests {
             container.with_read_txn(|txn| {
                 read_txn_counter += 1;
                 assert!(txn.try_read::<StatefulACapsule>().is_some());
-                assert_eq!(*txn.try_read::<ACapsule>().unwrap(), 0);
-                assert_eq!(*txn.try_read::<BCapsule>().unwrap(), 1);
-                assert_eq!(*txn.try_read::<CCapsule>().unwrap(), 2);
-                assert_eq!(*txn.try_read::<DCapsule>().unwrap(), 2);
-                assert_eq!(*txn.try_read::<ECapsule>().unwrap(), 1);
-                assert_eq!(*txn.try_read::<FCapsule>().unwrap(), 1);
-                assert_eq!(*txn.try_read::<GCapsule>().unwrap(), 3);
-                assert_eq!(*txn.try_read::<HCapsule>().unwrap(), 1);
+                assert_eq!(txn.try_read::<ACapsule>().unwrap(), 0);
+                assert_eq!(txn.try_read::<BCapsule>().unwrap(), 1);
+                assert_eq!(txn.try_read::<CCapsule>().unwrap(), 2);
+                assert_eq!(txn.try_read::<DCapsule>().unwrap(), 2);
+                assert_eq!(txn.try_read::<ECapsule>().unwrap(), 1);
+                assert_eq!(txn.try_read::<FCapsule>().unwrap(), 1);
+                assert_eq!(txn.try_read::<GCapsule>().unwrap(), 3);
+                assert_eq!(txn.try_read::<HCapsule>().unwrap(), 1);
             });
 
             rearch::read!(container, StatefulACapsule).1(10);
@@ -625,23 +641,23 @@ mod tests {
             container.with_read_txn(|txn| {
                 read_txn_counter += 1;
                 assert!(txn.try_read::<StatefulACapsule>().is_some());
-                assert_eq!(*txn.try_read::<ACapsule>().unwrap(), 10);
-                assert_eq!(*txn.try_read::<BCapsule>().unwrap(), 11);
+                assert_eq!(txn.try_read::<ACapsule>().unwrap(), 10);
+                assert_eq!(txn.try_read::<BCapsule>().unwrap(), 11);
                 assert_eq!(txn.try_read::<CCapsule>(), None);
                 assert_eq!(txn.try_read::<DCapsule>(), None);
-                assert_eq!(*txn.try_read::<ECapsule>().unwrap(), 11);
-                assert_eq!(*txn.try_read::<FCapsule>().unwrap(), 11);
+                assert_eq!(txn.try_read::<ECapsule>().unwrap(), 11);
+                assert_eq!(txn.try_read::<FCapsule>().unwrap(), 11);
                 assert_eq!(txn.try_read::<GCapsule>(), None);
-                assert_eq!(*txn.try_read::<HCapsule>().unwrap(), 1);
+                assert_eq!(txn.try_read::<HCapsule>().unwrap(), 1);
             });
 
             assert_eq!(read_txn_counter, 3);
         }
 
         #[capsule]
-        fn stateful_a(handle: &mut impl SideEffectHandle) -> (u8, Box<dyn Fn(u8) + Send + Sync>) {
+        fn stateful_a(handle: &mut impl SideEffectHandle) -> (u8, Arc<dyn Fn(u8) + Send + Sync>) {
             let (state, set_state) = handle.state(0);
-            (*state, Box::new(set_state))
+            (*state, Arc::new(set_state))
         }
 
         #[capsule]
