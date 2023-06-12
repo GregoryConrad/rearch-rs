@@ -569,4 +569,115 @@ mod tests {
             }
         }
     }
+
+    #[cfg(feature = "capsule-macro")]
+    mod complex_dependency_graph {
+        use crate::{self as rearch, capsule, BuiltinSideEffects, Container, SideEffectHandle};
+
+        // We use a more sophisticated graph here for a more thorough test of all functionality
+        //
+        // -> A -> B -> C -> D
+        //      \      / \
+        //  H -> E -> F -> G
+        //
+        // C, D, E, G, H are super pure. A, B, F are not.
+        #[test]
+        fn complex_dependency_graph() {
+            let container = Container::new();
+            let mut read_txn_counter = 0;
+
+            container.with_read_txn(|txn| {
+                read_txn_counter += 1;
+                assert!(txn.try_read::<StatefulACapsule>().is_none());
+                assert!(txn.try_read::<ACapsule>().is_none());
+                assert!(txn.try_read::<BCapsule>().is_none());
+                assert!(txn.try_read::<CCapsule>().is_none());
+                assert!(txn.try_read::<DCapsule>().is_none());
+                assert!(txn.try_read::<ECapsule>().is_none());
+                assert!(txn.try_read::<FCapsule>().is_none());
+                assert!(txn.try_read::<GCapsule>().is_none());
+                assert!(txn.try_read::<HCapsule>().is_none());
+            });
+
+            rearch::read!(container, DCapsule, GCapsule);
+
+            container.with_read_txn(|txn| {
+                read_txn_counter += 1;
+                assert!(txn.try_read::<StatefulACapsule>().is_some());
+                assert_eq!(*txn.try_read::<ACapsule>().unwrap(), 0);
+                assert_eq!(*txn.try_read::<BCapsule>().unwrap(), 1);
+                assert_eq!(*txn.try_read::<CCapsule>().unwrap(), 2);
+                assert_eq!(*txn.try_read::<DCapsule>().unwrap(), 2);
+                assert_eq!(*txn.try_read::<ECapsule>().unwrap(), 1);
+                assert_eq!(*txn.try_read::<FCapsule>().unwrap(), 1);
+                assert_eq!(*txn.try_read::<GCapsule>().unwrap(), 3);
+                assert_eq!(*txn.try_read::<HCapsule>().unwrap(), 1);
+            });
+
+            rearch::read!(container, StatefulACapsule).1(10);
+
+            container.with_read_txn(|txn| {
+                read_txn_counter += 1;
+                assert!(txn.try_read::<StatefulACapsule>().is_some());
+                assert_eq!(*txn.try_read::<ACapsule>().unwrap(), 10);
+                assert_eq!(*txn.try_read::<BCapsule>().unwrap(), 11);
+                assert_eq!(txn.try_read::<CCapsule>(), None);
+                assert_eq!(txn.try_read::<DCapsule>(), None);
+                assert_eq!(*txn.try_read::<ECapsule>().unwrap(), 11);
+                assert_eq!(*txn.try_read::<FCapsule>().unwrap(), 11);
+                assert_eq!(txn.try_read::<GCapsule>(), None);
+                assert_eq!(*txn.try_read::<HCapsule>().unwrap(), 1);
+            });
+
+            assert_eq!(read_txn_counter, 3);
+        }
+
+        #[capsule]
+        fn stateful_a(handle: &mut impl SideEffectHandle) -> (u8, Box<dyn Fn(u8) + Send + Sync>) {
+            let (state, set_state) = handle.state(0);
+            (*state, Box::new(set_state))
+        }
+
+        #[capsule]
+        fn a(StatefulACapsule(a): StatefulACapsule) -> u8 {
+            a.0
+        }
+
+        #[capsule]
+        fn b(ACapsule(a): ACapsule, handle: &mut impl SideEffectHandle) -> u8 {
+            handle.callonce(|| {});
+            a + 1
+        }
+
+        #[capsule]
+        fn c(BCapsule(b): BCapsule, FCapsule(f): FCapsule) -> u8 {
+            b + f
+        }
+
+        #[capsule]
+        fn d(CCapsule(c): CCapsule) -> u8 {
+            *c
+        }
+
+        #[capsule]
+        fn e(ACapsule(a): ACapsule, HCapsule(h): HCapsule) -> u8 {
+            a + h
+        }
+
+        #[capsule]
+        fn f(ECapsule(e): ECapsule, handle: &mut impl SideEffectHandle) -> u8 {
+            handle.callonce(|| {});
+            *e
+        }
+
+        #[capsule]
+        fn g(CCapsule(c): CCapsule, FCapsule(f): FCapsule) -> u8 {
+            c + f
+        }
+
+        #[capsule]
+        fn h() -> u8 {
+            1
+        }
+    }
 }
