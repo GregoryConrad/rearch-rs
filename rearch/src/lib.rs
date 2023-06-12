@@ -253,7 +253,7 @@ impl<'a> ContainerWriteTxn<'a> {
         // we can skip it with skip(1) when we are handling the rest of the dependent subgraph
         let build_order = self.create_build_order_stack(id).into_iter().rev().skip(1);
         let build_order = self.garbage_collect_diposable_nodes(build_order);
-        build_order.iter().for_each(|id| self.build_single_node(id));
+        build_order.for_each(|id| self.build_single_node(&id));
     }
 
     /// Gets the requested node or panics if it is not in the graph
@@ -316,22 +316,23 @@ impl<'a> ContainerWriteTxn<'a> {
     fn garbage_collect_diposable_nodes(
         &mut self,
         build_order: impl DoubleEndedIterator<Item = TypeId>,
-    ) -> Vec<TypeId> {
-        build_order
-            .rev()
-            .filter(|id| {
-                let is_disposable = self.node_or_panic(id).is_disposable();
-                if is_disposable {
-                    let node = self.nodes.remove(id).expect("Node should be in graph");
-                    node.dependencies.iter().for_each(|dep| {
-                        self.node_or_panic(dep).dependents.remove(id);
-                    });
-                    self.data.remove(id);
-                }
-                !is_disposable
-            })
-            .rev()
-            .collect::<Vec<_>>()
+    ) -> impl DoubleEndedIterator<Item = TypeId> {
+        let mut non_disposable = Vec::new();
+
+        build_order.rev().for_each(|id| {
+            let is_disposable = self.node_or_panic(&id).is_disposable();
+            if is_disposable {
+                self.data.remove(&id);
+                let node = self.nodes.remove(&id).expect("Node should be in graph");
+                node.dependencies.iter().for_each(|dep| {
+                    self.node_or_panic(dep).dependents.remove(&id);
+                });
+            } else {
+                non_disposable.push(id);
+            }
+        });
+
+        non_disposable.into_iter().rev()
     }
 }
 
