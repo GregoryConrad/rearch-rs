@@ -1,4 +1,5 @@
 #![feature(return_position_impl_trait_in_trait)]
+#![feature(trait_upcasting)]
 use concread::hashmap::{HashMapReadTxn, HashMapWriteTxn};
 use dyn_clone::DynClone;
 use std::{
@@ -53,9 +54,14 @@ macro_rules! read {
 /// and do not actually contain any data themselves.
 /// See the README for more.
 pub trait Capsule {
-    /// The type of data associated with this capsule.
-    // Associated type so that Capsule can only ever be implemented once for each concrete type
-    type T: Clone + Send + Sync + 'static;
+    /// The type of data associated with this capsule. Capsule types must be
+    /// `Clone + Send + Sync + 'static`.
+    /// It is recommended to only put types with "cheap" clones in Capsules;
+    /// think Copy types, small Vecs and other containers, basic data structures, and Arcs.
+    /// If you are dealing with a bigger chunk of data, consider wrapping it in an Arc.
+    // We use an associated type so that Capsule can only be implemented once
+    // for each concrete type
+    type T: CapsuleType;
 
     /// Builds the capsule's immutable data using a given snapshot of the data flow graph.
     /// (The snapshot, a ContainerWriteTxn, is abstracted away for you.)
@@ -134,12 +140,17 @@ impl Container {
     }
 }
 
+/// Represents a valid type of any capsule. Capsules must be `Clone + Send + Sync + 'static`.
+pub trait CapsuleType: Any + DynClone + Send + Sync + 'static {}
+dyn_clone::clone_trait_object!(CapsuleType);
+impl<T: Clone + Send + Sync + 'static> CapsuleType for T {}
+
 /// The internal backing store for a `Container`.
 /// All capsule data is stored within `data`, and all data flow graph nodes are stored in `nodes`.
 /// Keys for both are simply the `TypeId` of capsules, like `TypeId::of::<SomeCapsule>()`.
 #[derive(Default)]
 struct ContainerStore {
-    data: concread::hashmap::HashMap<TypeId, Box<dyn DynClone + Send + Sync>>,
+    data: concread::hashmap::HashMap<TypeId, Box<dyn CapsuleType>>,
     nodes: Mutex<std::collections::HashMap<TypeId, CapsuleManager>>,
 }
 impl ContainerStore {
@@ -194,29 +205,22 @@ impl CapsuleRebuilder {
 }
 
 pub struct ContainerReadTxn<'a> {
-    data: HashMapReadTxn<'a, TypeId, Box<dyn DynClone + Send + Sync>>,
+    data: HashMapReadTxn<'a, TypeId, Box<dyn CapsuleType>>,
 }
 impl<'a> ContainerReadTxn<'a> {
     pub fn try_read<C: Capsule + 'static>(&self) -> Option<C::T> {
         let id = TypeId::of::<C>();
         self.data.get(&id).map(|data| {
-            let data: Box<dyn DynClone + Send + Sync> = dyn_clone::clone_box(data.as_ref());
-            // SAFETY: The Box is a C::T because it is enforced via generics.
-            // For some reason with dyn_clone, Any's downcasts to C::T were failing.
-            // TODO This is something to look into as I would prefer to not use unsafe Rust,
-            // even if it is perfectly safe like in this case.
-            // Maybe file an issue over at dyn_clone asking about why
-            // Box<DynClone> -> Any -> downcast_ref::<Box<ActualType>>() fails?
-            unsafe {
-                let ptr = Box::into_raw(data) as *mut C::T;
-                *Box::from_raw(ptr)
-            }
+            let data: Box<dyn Any> = data.clone();
+            *data
+                .downcast::<C::T>()
+                .expect("Types should be properly enforced due to generics")
         })
     }
 }
 
 pub struct ContainerWriteTxn<'a> {
-    data: HashMapWriteTxn<'a, TypeId, Box<dyn DynClone + Send + Sync>>,
+    data: HashMapWriteTxn<'a, TypeId, Box<dyn CapsuleType>>,
     nodes: &'a mut std::collections::HashMap<TypeId, CapsuleManager>,
     rebuilder: CapsuleRebuilder,
 }
@@ -224,17 +228,10 @@ impl<'a> ContainerWriteTxn<'a> {
     pub fn try_read<C: Capsule + 'static>(&self) -> Option<C::T> {
         let id = TypeId::of::<C>();
         self.data.get(&id).map(|data| {
-            let data: Box<dyn DynClone + Send + Sync> = dyn_clone::clone_box(data.as_ref());
-            // SAFETY: The Box is a C::T because it is enforced via generics.
-            // For some reason with dyn_clone, Any's downcasts to C::T were failing.
-            // TODO This is something to look into as I would prefer to not use unsafe Rust,
-            // even if it is perfectly safe like in this case.
-            // Maybe file an issue over at dyn_clone asking about why
-            // Box<DynClone> -> Any -> downcast_ref::<Box<ActualType>>() fails?
-            unsafe {
-                let ptr = Box::into_raw(data) as *mut C::T;
-                *Box::from_raw(ptr)
-            }
+            let data: Box<dyn Any> = data.clone();
+            *data
+                .downcast::<C::T>()
+                .expect("Types should be properly enforced due to generics")
         })
     }
 
