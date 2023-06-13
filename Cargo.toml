@@ -5,4 +5,12 @@ members = ["rearch-capsule-macro", "rearch"]
 version = "0.0.0"
 edition = "2021"
 license = "MIT"
-# TODO other package info, we can take a look at meilisearch and redb for inspiration
+description = "Re-imagined approach to application design and architecture"
+repository = "https://github.com/GregoryConrad/rearch-rs"
+keywords = ["design", "architecture", "reactive", "immutable", "dependency-injection"]
+categories = ["caching", "concurrency"]
+authors = ["Gregory Conrad <contact@gsconrad.com>"]
+
+[workspace.dependencies]
+rearch-capsule-macro = { path = "rearch-capsule-macro", version = "0.*" }
+rearch = { path = "rearch", version = "0.*" }
