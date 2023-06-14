@@ -74,12 +74,23 @@ pub trait Capsule {
     ) -> Self::T;
 }
 
+/// Allows you to read the current data of capsules based on the given state of the container.
 pub trait CapsuleReader<T> {
+    /// Reads the current data of the supplied capsule, initializing it if needed.
+    /// Internally forms a dependency graph amongst capsules, so feel free to conditionally invoke
+    /// this function in case you only conditionally need a capsule's value.
     fn read<O: Capsule + 'static>(&mut self) -> O::T;
+
+    /// Reads the current value of this capsule, if there is one
+    /// (there won't be on a first build or directly after being garbage collected).
     fn read_self(&self) -> Option<T>;
 }
 
+/// Provides functionality to trigger arbitrary side effects in a capsule,
+/// but in a deterministic way.
 pub trait SideEffectHandle {
+    /// The backing api of the side effect handle.
+    /// Keeping this as a type in the trait allows for static dispatch.
     type Api: SideEffectHandleApi + 'static;
 
     // Registers the given side effect by initializing it on the first build and then returning
