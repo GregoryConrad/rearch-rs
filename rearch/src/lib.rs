@@ -582,7 +582,7 @@ mod tests {
             ) -> Self::T {
                 let ((state, set_state), _) = handle.register((
                     side_effects::StateEffect(123),
-                    side_effects::StateFromFnEffect::new(|| 321),
+                    side_effects::LazyStateEffect::new(|| 321),
                 ));
                 reader.read_self();
                 (*state, set_state)
