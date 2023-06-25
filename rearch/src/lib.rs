@@ -85,11 +85,20 @@ pub trait CapsuleReader<T> {
     fn read_self(&self) -> Option<T>;
 }
 
-// TODO try replacing this with just a impl FnOnce to register effects; that'd be far cleaner
+/// Provides a mechanism to register side effects in the build method.
+// Ideally, this would just be a generic closure, but those don't exist in Rust.
 pub trait SideEffectHandle<'a> {
+    /// Registers the given side effect and returns its build api.
+    /// You can only call register once on purpose (it consumes self);
+    /// to register multiple side effects, pass them in together as a tuple.
     fn register<Effect: SideEffect<'a>>(self, effect: Effect) -> Effect::Api;
 }
 
+/// Represents a side effect that can be utilized within the build method.
+/// The key observation about side effects is that they form a tree, where each side effect:
+/// - Has its own private state (including composing other side effects together)
+/// - Presents some api to the build method, probably including a way to rebuild & update its state
+// SideEffect needs a lifetime so that `Api` can contain a lifetime as well (if it needs to)
 pub trait SideEffect<'a>: Send + 'static {
     /// The type exposed in the capsule build function when this side effect is registered;
     /// in other words, this is the api exposed by the side effect.
@@ -106,17 +115,16 @@ pub trait SideEffect<'a>: Send + 'static {
     fn api(&'a mut self, rebuilder: Box<dyn SideEffectRebuilder<Self>>) -> Self::Api;
 }
 
-// TODO we might be able to remove this dyn dispatch by making SideEffect itself take a generic
-// that is a rebuilder, so side effect doesn't know about actual impl but gets one injected
-pub trait SideEffectRebuilder<State: 'static>:
-    Fn(Box<dyn FnOnce(&mut State)>) + Send + Sync + DynClone + 'static
+// Using a trait object here to prevent a sea of complicated generics everywhere
+pub trait SideEffectRebuilder<S>:
+    Fn(Box<dyn FnOnce(&mut S)>) + Send + Sync + DynClone + 'static
 {
 }
-impl<State: 'static, T: Fn(Box<dyn FnOnce(&mut State)>) + Send + Sync + Clone + 'static>
-    SideEffectRebuilder<State> for T
+impl<S, F> SideEffectRebuilder<S> for F where
+    F: Fn(Box<dyn FnOnce(&mut S)>) + Send + Sync + Clone + 'static
 {
 }
-dyn_clone::clone_trait_object!(<T> SideEffectRebuilder<T>);
+dyn_clone::clone_trait_object!(<S> SideEffectRebuilder<S>);
 
 /// Containers store the current data and state of the data flow graph created by capsules
 /// and their dependencies/dependents.
@@ -209,6 +217,9 @@ struct CapsuleRebuilder(Weak<ContainerStore>);
 impl CapsuleRebuilder {
     fn rebuild(&self, id: TypeId, mutation: impl FnOnce(&mut CapsuleManager)) {
         if let Some(store) = self.0.upgrade() {
+            #[cfg(feature = "logging")]
+            log::debug!("Rebuilding Capsule ({:?})", id);
+
             // Note: The node is guaranteed to be in the graph here since this is a rebuild.
             // (And to trigger a rebuild, a capsule must have used its side effect handle,
             // and using the side effect handle prevents the super pure gc.)
@@ -221,9 +232,8 @@ impl CapsuleRebuilder {
         } else {
             #[cfg(feature = "logging")]
             log::warn!(
-                "A rebuild was triggered on the Capsule with TypeId {:?} {}",
-                id,
-                "after its Container was disposed!"
+                "Rebuild triggered after Container disposal on Capsule ({:?})",
+                id
             );
         }
     }
@@ -263,6 +273,9 @@ impl ContainerWriteTxn<'_> {
     pub fn read_or_init<C: Capsule + 'static>(&mut self) -> C::T {
         let id = TypeId::of::<C>();
         if !self.data.contains_key(&id) {
+            #[cfg(feature = "logging")]
+            log::debug!("Initializing {} ({:?})", std::any::type_name::<C>(), id);
+
             self.build_capsule::<C>();
         }
         self.try_read::<C>()
@@ -399,6 +412,9 @@ impl CapsuleManager {
     fn build<C: Capsule + 'static>(txn: &mut ContainerWriteTxn) {
         let id = TypeId::of::<C>();
 
+        #[cfg(feature = "logging")]
+        log::trace!("Building {} ({:?})", std::any::type_name::<C>(), id);
+
         let manager = txn.node_or_panic(&id);
         let rebuilder = manager.rebuilder.clone();
         let mut side_effect_data = std::mem::take(&mut manager.side_effect_data);
@@ -472,16 +488,15 @@ impl<'a> SideEffectHandle<'a> for CapsuleSideEffectHandleImpl<'a> {
             .downcast_mut::<Effect>()
             .expect("A SideEffectHandle's registered SideEffect cannot be changed!");
 
-        effect.api(Box::new(move |state_setter| {
+        effect.api(Box::new(move |mutation| {
             self.rebuilder.rebuild(self.id, |manager| {
-                state_setter(
-                    manager
-                        .side_effect_data
-                        .get_mut()
-                        .expect("Side effect data should've been initialized in previous build")
-                        .downcast_mut::<Effect>()
-                        .expect("A SideEffectHandle's registered SideEffect cannot be changed!"),
-                )
+                let effect = manager
+                    .side_effect_data
+                    .get_mut()
+                    .expect("Side effect data should've been initialized in previous build")
+                    .downcast_mut::<Effect>()
+                    .expect("A SideEffectHandle's registered SideEffect cannot be changed!");
+                mutation(effect);
             })
         }))
     }
