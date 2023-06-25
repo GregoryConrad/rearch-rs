@@ -219,7 +219,12 @@ impl CapsuleRebuilder {
                 txn.build_capsule_or_panic(id);
             });
         } else {
-            // TODO log that C attempted to rebuild itself after container disposal
+            #[cfg(feature = "logging")]
+            log::warn!(
+                "A rebuild was triggered on the Capsule with TypeId {:?} {}",
+                id,
+                "after its Container was disposed!"
+            );
         }
     }
 }
