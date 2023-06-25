@@ -1,6 +1,85 @@
-use std::sync::{Arc, Mutex};
+use std::cell::OnceCell;
 
-use crate::{SideEffectHandle, SideEffectHandleApi};
+use crate::{SideEffect, SideEffectRebuilder};
+
+// TODO make macro_rules! from these two
+impl SideEffect<'_> for () {
+    type Api = ();
+    fn api(&mut self, _: Box<dyn SideEffectRebuilder<Self>>) -> Self::Api {}
+}
+impl<'a, A: SideEffect<'a>, B: SideEffect<'a>> SideEffect<'a> for (A, B) {
+    type Api = (A::Api, B::Api);
+
+    #[allow(unused_variables)]
+    fn api(&'a mut self, rebuild: Box<dyn SideEffectRebuilder<Self>>) -> Self::Api {
+        let a_rebuilder: Box<dyn SideEffectRebuilder<A>> = {
+            let rebuild = rebuild.clone();
+            Box::new(move |state_setter| {
+                rebuild(Box::new(move |store: &mut Self| {
+                    let (ref mut a_store, ref mut b_store) = store;
+                    state_setter(a_store)
+                }))
+            })
+        };
+        let b_rebuilder: Box<dyn SideEffectRebuilder<B>> = {
+            let rebuild = rebuild.clone();
+            Box::new(move |state_setter| {
+                rebuild(Box::new(move |store: &mut Self| {
+                    let (ref mut a_store, ref mut b_store) = store;
+                    state_setter(b_store)
+                }))
+            })
+        };
+
+        let (a_effect, b_effect) = self;
+        (a_effect.api(a_rebuilder), b_effect.api(b_rebuilder))
+    }
+}
+
+pub struct StateEffect<T>(pub T);
+impl<T> StateEffect<T> {
+    pub fn new(default: T) -> Self {
+        Self(default)
+    }
+}
+impl<'a, T: Send + 'static> SideEffect<'a> for StateEffect<T> {
+    type Api = (&'a mut T, impl Fn(T) + Send + Sync + Clone + 'static);
+
+    fn api(&'a mut self, rebuild: Box<dyn SideEffectRebuilder<Self>>) -> Self::Api {
+        (&mut self.0, move |new_state| {
+            rebuild(Box::new(|effect| effect.0 = new_state))
+        })
+    }
+}
+
+// This uses a hacked together Lazy implementation because LazyCell doesn't have force_mut;
+// see https://github.com/rust-lang/rust/issues/109736#issuecomment-1605787094
+pub struct StateFromFnEffect<T, F: FnOnce() -> T>(OnceCell<T>, Option<F>);
+impl<T, F: FnOnce() -> T> StateFromFnEffect<T, F> {
+    pub fn new(default: F) -> Self {
+        Self(OnceCell::new(), Some(default))
+    }
+}
+impl<'a, T: Send + 'static, F: FnOnce() -> T + Send + 'static> SideEffect<'a>
+    for StateFromFnEffect<T, F>
+{
+    type Api = (&'a mut T, impl Fn(T) + Send + Sync + Clone + 'static);
+
+    fn api(&'a mut self, rebuild: Box<dyn SideEffectRebuilder<Self>>) -> Self::Api {
+        self.0.get_or_init(|| {
+            std::mem::take(&mut self.1).expect("Init fn should be present for state init")()
+        });
+        (self.0.get_mut().unwrap(), move |new_state| {
+            rebuild(Box::new(|effect| {
+                effect.0.take();
+                _ = effect.0.set(new_state);
+            }))
+        })
+    }
+}
+
+/*
+use std::sync::{Arc, Mutex};
 
 pub trait BuiltinSideEffects {
     type Api: SideEffectHandleApi + 'static;
@@ -458,3 +537,4 @@ mod tests {
         }
     }
 }
+*/

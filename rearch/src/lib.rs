@@ -1,10 +1,10 @@
-#![feature(return_position_impl_trait_in_trait)]
 #![feature(trait_upcasting)]
+#![feature(impl_trait_in_assoc_type)]
 use concread::hashmap::{HashMapReadTxn, HashMapWriteTxn};
 use dyn_clone::DynClone;
 use std::{
     any::{Any, TypeId},
-    cell::RefCell,
+    cell::OnceCell,
     collections::HashSet,
     marker::PhantomData,
     sync::{Arc, Mutex, Weak},
@@ -14,8 +14,7 @@ use std::{
 #[cfg(feature = "capsule-macro")]
 pub use rearch_capsule_macro::{capsule, factory};
 
-mod side_effects;
-pub use side_effects::*;
+pub mod side_effects;
 
 /// Performs a *consistent* read on all supplied capsules.
 ///
@@ -68,9 +67,9 @@ pub trait Capsule {
     ///
     /// ABSOLUTELY DO NOT TRIGGER ANY REBUILDS WITHIN THIS FUNCTION!
     /// Doing so will result in a deadlock.
-    fn build(
+    fn build<'a>(
         reader: &mut impl CapsuleReader<Self::T>,
-        handle: &mut impl SideEffectHandle,
+        handle: impl SideEffectHandle<'a>,
     ) -> Self::T;
 }
 
@@ -86,27 +85,38 @@ pub trait CapsuleReader<T> {
     fn read_self(&self) -> Option<T>;
 }
 
-/// Provides functionality to trigger arbitrary side effects in a capsule,
-/// but in a deterministic way.
-pub trait SideEffectHandle {
-    /// The backing api of the side effect handle.
-    /// Keeping this as a type in the trait allows for static dispatch.
-    type Api: SideEffectHandleApi + 'static;
-
-    // Registers the given side effect by initializing it on the first build and then returning
-    // that same value on every subsequent build.
-    // This allows you to store private mutable data that can be accessed on subsequent builds
-    // in a deterministic way.
-    fn register_side_effect<R: Send + Sync + 'static>(
-        &mut self,
-        side_effect: impl FnOnce(&mut Self::Api) -> R,
-    ) -> Arc<R>;
+// TODO try replacing this with just a impl FnOnce to register effects; that'd be far cleaner
+pub trait SideEffectHandle<'a> {
+    fn register<Effect: SideEffect<'a>>(self, effect: Effect) -> Effect::Api;
 }
 
-pub trait SideEffectHandleApi {
-    /// Provides a mechanism to trigger rebuilds.
-    fn rebuilder<RebuildMutation: FnOnce()>(&self) -> impl Fn(RebuildMutation) + Send + Sync;
+pub trait SideEffect<'a>: Send + 'static {
+    /// The type exposed in the capsule build function when this side effect is registered;
+    /// in other words, this is the api exposed by the side effect.
+    ///
+    /// Often, a side effect's api is a tuple, containing values like:
+    /// - Data and/or state in this side effect
+    /// - Function callbacks (perhaps to trigger a rebuild and/or update the side effect state)
+    /// - Anything else imaginable!
+    type Api;
+
+    /// Construct this side effect's build api, given:
+    /// - A mutable reference to the current state of this side effect (&mut self)
+    /// - A mechanism to trigger rebuilds that can also update the state of this side effect
+    fn api(&'a mut self, rebuilder: Box<dyn SideEffectRebuilder<Self>>) -> Self::Api;
 }
+
+// TODO we might be able to remove this dyn dispatch by making SideEffect itself take a generic
+// that is a rebuilder, so side effect doesn't know about actual impl but gets one injected
+pub trait SideEffectRebuilder<State: 'static>:
+    Fn(Box<dyn FnOnce(&mut State)>) + Send + Sync + DynClone + 'static
+{
+}
+impl<State: 'static, T: Fn(Box<dyn FnOnce(&mut State)>) + Send + Sync + Clone + 'static>
+    SideEffectRebuilder<State> for T
+{
+}
+dyn_clone::clone_trait_object!(<T> SideEffectRebuilder<T>);
 
 /// Containers store the current data and state of the data flow graph created by capsules
 /// and their dependencies/dependents.
@@ -153,8 +163,8 @@ impl Container {
 
 /// Represents a valid type of any capsule. Capsules must be `Clone + Send + Sync + 'static`.
 pub trait CapsuleType: Any + DynClone + Send + Sync + 'static {}
-dyn_clone::clone_trait_object!(CapsuleType);
 impl<T: Clone + Send + Sync + 'static> CapsuleType for T {}
+dyn_clone::clone_trait_object!(CapsuleType);
 
 /// The internal backing store for a `Container`.
 /// All capsule data is stored within `data`, and all data flow graph nodes are stored in `nodes`.
@@ -197,16 +207,15 @@ impl ContainerStore {
 #[derive(Clone)]
 struct CapsuleRebuilder(Weak<ContainerStore>);
 impl CapsuleRebuilder {
-    fn rebuild(&self, id: TypeId, mutation: impl FnOnce()) {
+    fn rebuild(&self, id: TypeId, mutation: impl FnOnce(&mut CapsuleManager)) {
         if let Some(store) = self.0.upgrade() {
+            // Note: The node is guaranteed to be in the graph here since this is a rebuild.
+            // (And to trigger a rebuild, a capsule must have used its side effect handle,
+            // and using the side effect handle prevents the super pure gc.)
             store.with_write_txn(self.clone(), |txn| {
                 // We have the txn now, so that means we also hold the data & nodes lock.
                 // Thus, this is where we should run the supplied mutation.
-                mutation();
-
-                // The node is guaranteed to be in the graph since this is a rebuild.
-                // (To trigger a rebuild, a capsule must have used its side effect handle,
-                // and using the side effect handle prevents the super pure gc.)
+                mutation(txn.node_or_panic(&id));
                 txn.build_capsule_or_panic(id);
             });
         } else {
@@ -218,7 +227,7 @@ impl CapsuleRebuilder {
 pub struct ContainerReadTxn<'a> {
     data: HashMapReadTxn<'a, TypeId, Box<dyn CapsuleType>>,
 }
-impl<'a> ContainerReadTxn<'a> {
+impl ContainerReadTxn<'_> {
     pub fn try_read<C: Capsule + 'static>(&self) -> Option<C::T> {
         let id = TypeId::of::<C>();
         self.data.get(&id).map(|data| {
@@ -235,7 +244,7 @@ pub struct ContainerWriteTxn<'a> {
     nodes: &'a mut std::collections::HashMap<TypeId, CapsuleManager>,
     rebuilder: CapsuleRebuilder,
 }
-impl<'a> ContainerWriteTxn<'a> {
+impl ContainerWriteTxn<'_> {
     pub fn try_read<C: Capsule + 'static>(&self) -> Option<C::T> {
         let id = TypeId::of::<C>();
         self.data.get(&id).map(|data| {
@@ -256,7 +265,7 @@ impl<'a> ContainerWriteTxn<'a> {
     }
 }
 
-impl<'a> ContainerWriteTxn<'a> {
+impl ContainerWriteTxn<'_> {
     /// Triggers a first build or rebuild for the supplied capsule
     fn build_capsule<C: Capsule + 'static>(&mut self) {
         let id = TypeId::of::<C>();
@@ -362,26 +371,21 @@ impl<'a> ContainerWriteTxn<'a> {
 
 // This struct is completely typeless in order to avoid *a lot* of dynamic dispatch
 // that we used to have when dealing with the graph nodes.
-// We avoid needing types by:
-// - Storing our capsule's TypeId directly so that we can trigger rebuilds of our capsule
-// - Storing a function pointer that performs the actual build
-// Those are the only type-specific behaviors!
+// We avoid needing types by storing a fn pointer of a function that performs the actual build.
+// A capsule's build is a capsule's only type-specific behavior!
 struct CapsuleManager {
-    id: TypeId,
     dependencies: HashSet<TypeId>,
     dependents: HashSet<TypeId>,
-    side_effect_data: Vec<Arc<dyn Any + Send + Sync>>,
+    side_effect_data: OnceCell<Box<dyn Any + Send>>,
     rebuilder: CapsuleRebuilder,
     build: fn(&mut ContainerWriteTxn),
 }
-
 impl CapsuleManager {
     fn new<C: Capsule + 'static>(rebuilder: CapsuleRebuilder) -> Self {
         CapsuleManager {
-            id: TypeId::of::<C>(),
             dependencies: HashSet::new(),
             dependents: HashSet::new(),
-            side_effect_data: Vec::new(),
+            side_effect_data: OnceCell::new(),
             rebuilder,
             build: Self::build::<C>,
         }
@@ -389,39 +393,40 @@ impl CapsuleManager {
 
     fn build<C: Capsule + 'static>(txn: &mut ContainerWriteTxn) {
         let id = TypeId::of::<C>();
-        // We need RefCell in order to safely do a double &mut borrow on txn
-        let txn = &RefCell::new(txn);
+
+        let manager = txn.node_or_panic(&id);
+        let rebuilder = manager.rebuilder.clone();
+        let mut side_effect_data = std::mem::take(&mut manager.side_effect_data);
+
         let new_data = C::build(
             &mut CapsuleReaderImpl::<C> {
                 txn,
                 ghost: PhantomData,
             },
-            &mut CapsuleSideEffectHandleImpl { id, txn, index: 0 },
+            CapsuleSideEffectHandleImpl {
+                id,
+                rebuilder,
+                side_effect_data: &mut side_effect_data,
+            },
         );
-        txn.borrow_mut().data.insert(id, Box::new(new_data));
+
+        let manager = txn.node_or_panic(&id);
+        manager.side_effect_data = side_effect_data;
+
+        txn.data.insert(id, Box::new(new_data));
     }
 
     fn is_disposable(&self) -> bool {
-        let is_super_pure = self.side_effect_data.is_empty();
+        let is_super_pure = self.side_effect_data.get().is_none();
         is_super_pure && self.dependents.is_empty()
     }
 }
 
-impl SideEffectHandleApi for CapsuleManager {
-    fn rebuilder<RebuildMutation: FnOnce()>(&self) -> impl Fn(RebuildMutation) + Send + Sync {
-        let id = self.id;
-        let rebuilder = self.rebuilder.clone();
-        move |mutation| rebuilder.rebuild(id, mutation)
-    }
-}
-
 struct CapsuleReaderImpl<'txn_scope, 'txn_total, C: Capsule + 'static> {
-    txn: &'txn_scope RefCell<&'txn_scope mut ContainerWriteTxn<'txn_total>>,
+    txn: &'txn_scope mut ContainerWriteTxn<'txn_total>,
     ghost: PhantomData<C::T>, // phantom with C::T to prevent needing C to be Send + Sync
 }
-impl<'txn_scope, 'txn_total, C: Capsule + 'static> CapsuleReader<C::T>
-    for CapsuleReaderImpl<'txn_scope, 'txn_total, C>
-{
+impl<C: Capsule + 'static> CapsuleReader<C::T> for CapsuleReaderImpl<'_, '_, C> {
     fn read<O: Capsule + 'static>(&mut self) -> O::T {
         let (this, other) = (TypeId::of::<C>(), TypeId::of::<O>());
         if this == other {
@@ -432,46 +437,48 @@ impl<'txn_scope, 'txn_total, C: Capsule + 'static> CapsuleReader<C::T>
         }
 
         // Get the value (and make sure the other manager is initialized!)
-        let mut txn = self.txn.borrow_mut();
-        let data = txn.read_or_init::<O>();
+        let data = self.txn.read_or_init::<O>();
 
         // Take care of some dependency housekeeping
-        txn.node_or_panic(&other).dependents.insert(this);
-        txn.node_or_panic(&this).dependencies.insert(other);
+        self.txn.node_or_panic(&other).dependents.insert(this);
+        self.txn.node_or_panic(&this).dependencies.insert(other);
 
         data
     }
 
     fn read_self(&self) -> Option<C::T> {
-        self.txn.borrow().try_read::<C>()
+        self.txn.try_read::<C>()
     }
 }
 
-struct CapsuleSideEffectHandleImpl<'txn_scope, 'txn_total> {
+struct CapsuleSideEffectHandleImpl<'a> {
     id: TypeId,
-    txn: &'txn_scope RefCell<&'txn_scope mut ContainerWriteTxn<'txn_total>>,
-    index: u16,
+    rebuilder: CapsuleRebuilder,
+    side_effect_data: &'a mut OnceCell<Box<dyn Any + Send>>,
 }
-impl<'txn_scope, 'txn_total> SideEffectHandle
-    for CapsuleSideEffectHandleImpl<'txn_scope, 'txn_total>
-{
-    type Api = CapsuleManager;
-    fn register_side_effect<R: Send + Sync + 'static>(
-        &mut self,
-        side_effect: impl FnOnce(&mut Self::Api) -> R,
-    ) -> Arc<R> {
-        let mut txn = self.txn.borrow_mut();
-        let manager = txn.node_or_panic(&self.id);
-        if self.index as usize == manager.side_effect_data.len() {
-            let data = side_effect(manager);
-            manager.side_effect_data.push(Arc::new(data));
-        };
-        let data = manager.side_effect_data[self.index as usize].clone();
-        self.index += 1;
-        data.downcast::<R>().expect(concat!(
-            "You cannot conditionally call side effects! ",
-            "Always call your side effects unconditionally every build."
-        ))
+impl<'a> SideEffectHandle<'a> for CapsuleSideEffectHandleImpl<'a> {
+    fn register<Effect: SideEffect<'a>>(self, effect: Effect) -> Effect::Api {
+        self.side_effect_data.get_or_init(|| Box::new(effect));
+
+        let effect = self
+            .side_effect_data
+            .get_mut()
+            .expect("Side effect data should've been initialized above")
+            .downcast_mut::<Effect>()
+            .expect("A SideEffectHandle's registered SideEffect cannot be changed!");
+
+        effect.api(Box::new(move |state_setter| {
+            self.rebuilder.rebuild(self.id, |manager| {
+                state_setter(
+                    manager
+                        .side_effect_data
+                        .get_mut()
+                        .expect("Side effect data should've been initialized in previous build")
+                        .downcast_mut::<Effect>()
+                        .expect("A SideEffectHandle's registered SideEffect cannot be changed!"),
+                )
+            })
+        }))
     }
 }
 
@@ -521,9 +528,9 @@ mod tests {
         impl Capsule for CountCapsule {
             type T = u8;
 
-            fn build(
+            fn build<'a>(
                 _: &mut impl CapsuleReader<Self::T>,
-                _: &mut impl SideEffectHandle,
+                _: impl SideEffectHandle<'a>,
             ) -> Self::T {
                 0
             }
@@ -532,13 +539,39 @@ mod tests {
         impl Capsule for CountPlusOneCapsule {
             type T = u8;
 
-            fn build(
+            fn build<'a>(
                 reader: &mut impl CapsuleReader<Self::T>,
-                _: &mut impl SideEffectHandle,
+                _: impl SideEffectHandle<'a>,
             ) -> Self::T {
                 reader.read::<CountCapsule>() + 1
             }
         }
+    }
+
+    #[test]
+    fn capsule_uses_read_and_handle() {
+        use crate::*;
+
+        struct MyCapsule;
+        impl crate::Capsule for MyCapsule {
+            type T = (u8, impl Fn(u8) + Send + Sync + Clone + 'static);
+
+            fn build<'a>(
+                reader: &mut impl crate::CapsuleReader<Self::T>,
+                handle: impl crate::SideEffectHandle<'a>,
+            ) -> Self::T {
+                let ((state, set_state), _) = handle.register((
+                    side_effects::StateEffect(123),
+                    side_effects::StateFromFnEffect::new(|| 321),
+                ));
+                reader.read_self();
+                (*state, set_state)
+            }
+        }
+
+        let container = Container::new();
+        let (state, _) = read!(container, MyCapsule);
+        assert_eq!(state, 123);
     }
 
     mod state_updates {
@@ -547,15 +580,18 @@ mod tests {
         #[test]
         fn state_gets_updates() {
             let container = Container::new();
+
             let (state, set_state) = read!(container, StateCapsule);
-            assert_eq!(0, state);
+            assert_eq!(state, 0);
+
             set_state(1);
             let (state, set_state) = read!(container, StateCapsule);
-            assert_eq!(1, state);
+            assert_eq!(state, 1);
+
             set_state(2);
             set_state(3);
             let (state, _) = read!(container, StateCapsule);
-            assert_eq!(3, state);
+            assert_eq!(state, 3);
         }
 
         #[test]
@@ -574,14 +610,14 @@ mod tests {
 
         struct StateCapsule;
         impl Capsule for StateCapsule {
-            type T = (u8, Arc<dyn Fn(u8) + Send + Sync>);
+            type T = (u8, impl Fn(u8) + Send + Clone + 'static);
 
-            fn build(
+            fn build<'a>(
                 _: &mut impl CapsuleReader<Self::T>,
-                handle: &mut impl SideEffectHandle,
+                handle: impl SideEffectHandle<'a>,
             ) -> Self::T {
-                let (state, set_state) = handle.state(0);
-                (*state, Arc::new(set_state))
+                let (state, set_state) = handle.register(side_effects::StateEffect(0));
+                (*state, set_state)
             }
         }
 
@@ -589,83 +625,81 @@ mod tests {
         impl Capsule for DependentCapsule {
             type T = u8;
 
-            fn build(
+            fn build<'a>(
                 reader: &mut impl CapsuleReader<Self::T>,
-                _: &mut impl SideEffectHandle,
+                _: impl SideEffectHandle<'a>,
             ) -> Self::T {
                 reader.read::<StateCapsule>().0 + 1
             }
         }
     }
 
+    // We use a more sophisticated graph here for a more thorough test of all functionality
+    //
+    // -> A -> B -> C -> D
+    //      \      / \
+    //  H -> E -> F -> G
+    //
+    // C, D, E, G, H are super pure. A, B, F are not.
     #[cfg(feature = "capsule-macro")]
-    mod complex_dependency_graph {
-        use std::sync::Arc;
+    #[test]
+    fn complex_dependency_graph() {
+        use crate::{self as rearch, capsule, side_effects, Container, SideEffectHandle};
 
-        use crate::{self as rearch, capsule, BuiltinSideEffects, Container, SideEffectHandle};
+        let container = Container::new();
+        let mut read_txn_counter = 0;
 
-        // We use a more sophisticated graph here for a more thorough test of all functionality
-        //
-        // -> A -> B -> C -> D
-        //      \      / \
-        //  H -> E -> F -> G
-        //
-        // C, D, E, G, H are super pure. A, B, F are not.
-        #[test]
-        fn complex_dependency_graph() {
-            let container = Container::new();
-            let mut read_txn_counter = 0;
+        container.with_read_txn(|txn| {
+            read_txn_counter += 1;
+            assert!(txn.try_read::<StatefulACapsule>().is_none());
+            assert_eq!(txn.try_read::<ACapsule>(), None);
+            assert_eq!(txn.try_read::<BCapsule>(), None);
+            assert_eq!(txn.try_read::<CCapsule>(), None);
+            assert_eq!(txn.try_read::<DCapsule>(), None);
+            assert_eq!(txn.try_read::<ECapsule>(), None);
+            assert_eq!(txn.try_read::<FCapsule>(), None);
+            assert_eq!(txn.try_read::<GCapsule>(), None);
+            assert_eq!(txn.try_read::<HCapsule>(), None);
+        });
 
-            container.with_read_txn(|txn| {
-                read_txn_counter += 1;
-                assert!(txn.try_read::<StatefulACapsule>().is_none());
-                assert_eq!(txn.try_read::<ACapsule>(), None);
-                assert_eq!(txn.try_read::<BCapsule>(), None);
-                assert_eq!(txn.try_read::<CCapsule>(), None);
-                assert_eq!(txn.try_read::<DCapsule>(), None);
-                assert_eq!(txn.try_read::<ECapsule>(), None);
-                assert_eq!(txn.try_read::<FCapsule>(), None);
-                assert_eq!(txn.try_read::<GCapsule>(), None);
-                assert_eq!(txn.try_read::<HCapsule>(), None);
-            });
+        rearch::read!(container, DCapsule, GCapsule);
 
-            rearch::read!(container, DCapsule, GCapsule);
+        container.with_read_txn(|txn| {
+            read_txn_counter += 1;
+            assert!(txn.try_read::<StatefulACapsule>().is_some());
+            assert_eq!(txn.try_read::<ACapsule>().unwrap(), 0);
+            assert_eq!(txn.try_read::<BCapsule>().unwrap(), 1);
+            assert_eq!(txn.try_read::<CCapsule>().unwrap(), 2);
+            assert_eq!(txn.try_read::<DCapsule>().unwrap(), 2);
+            assert_eq!(txn.try_read::<ECapsule>().unwrap(), 1);
+            assert_eq!(txn.try_read::<FCapsule>().unwrap(), 1);
+            assert_eq!(txn.try_read::<GCapsule>().unwrap(), 3);
+            assert_eq!(txn.try_read::<HCapsule>().unwrap(), 1);
+        });
 
-            container.with_read_txn(|txn| {
-                read_txn_counter += 1;
-                assert!(txn.try_read::<StatefulACapsule>().is_some());
-                assert_eq!(txn.try_read::<ACapsule>().unwrap(), 0);
-                assert_eq!(txn.try_read::<BCapsule>().unwrap(), 1);
-                assert_eq!(txn.try_read::<CCapsule>().unwrap(), 2);
-                assert_eq!(txn.try_read::<DCapsule>().unwrap(), 2);
-                assert_eq!(txn.try_read::<ECapsule>().unwrap(), 1);
-                assert_eq!(txn.try_read::<FCapsule>().unwrap(), 1);
-                assert_eq!(txn.try_read::<GCapsule>().unwrap(), 3);
-                assert_eq!(txn.try_read::<HCapsule>().unwrap(), 1);
-            });
+        rearch::read!(container, StatefulACapsule).1(10);
 
-            rearch::read!(container, StatefulACapsule).1(10);
+        container.with_read_txn(|txn| {
+            read_txn_counter += 1;
+            assert!(txn.try_read::<StatefulACapsule>().is_some());
+            assert_eq!(txn.try_read::<ACapsule>().unwrap(), 10);
+            assert_eq!(txn.try_read::<BCapsule>().unwrap(), 11);
+            assert_eq!(txn.try_read::<CCapsule>(), None);
+            assert_eq!(txn.try_read::<DCapsule>(), None);
+            assert_eq!(txn.try_read::<ECapsule>().unwrap(), 11);
+            assert_eq!(txn.try_read::<FCapsule>().unwrap(), 11);
+            assert_eq!(txn.try_read::<GCapsule>(), None);
+            assert_eq!(txn.try_read::<HCapsule>().unwrap(), 1);
+        });
 
-            container.with_read_txn(|txn| {
-                read_txn_counter += 1;
-                assert!(txn.try_read::<StatefulACapsule>().is_some());
-                assert_eq!(txn.try_read::<ACapsule>().unwrap(), 10);
-                assert_eq!(txn.try_read::<BCapsule>().unwrap(), 11);
-                assert_eq!(txn.try_read::<CCapsule>(), None);
-                assert_eq!(txn.try_read::<DCapsule>(), None);
-                assert_eq!(txn.try_read::<ECapsule>().unwrap(), 11);
-                assert_eq!(txn.try_read::<FCapsule>().unwrap(), 11);
-                assert_eq!(txn.try_read::<GCapsule>(), None);
-                assert_eq!(txn.try_read::<HCapsule>().unwrap(), 1);
-            });
-
-            assert_eq!(read_txn_counter, 3);
-        }
+        assert_eq!(read_txn_counter, 3);
 
         #[capsule]
-        fn stateful_a(handle: &mut impl SideEffectHandle) -> (u8, Arc<dyn Fn(u8) + Send + Sync>) {
-            let (state, set_state) = handle.state(0);
-            (*state, Arc::new(set_state))
+        fn stateful_a<'a>(
+            handle: impl SideEffectHandle<'a>,
+        ) -> (u8, std::sync::Arc<dyn Fn(u8) + Send + Sync>) {
+            let (state, set_state) = handle.register(side_effects::StateEffect(0));
+            (*state, std::sync::Arc::new(set_state))
         }
 
         #[capsule]
@@ -674,8 +708,8 @@ mod tests {
         }
 
         #[capsule]
-        fn b(ACapsule(a): ACapsule, handle: &mut impl SideEffectHandle) -> u8 {
-            handle.callonce(|| {});
+        fn b<'a>(ACapsule(a): ACapsule, handle: impl SideEffectHandle<'a>) -> u8 {
+            handle.register(());
             a + 1
         }
 
@@ -686,7 +720,7 @@ mod tests {
 
         #[capsule]
         fn d(CCapsule(c): CCapsule) -> u8 {
-            *c
+            c
         }
 
         #[capsule]
@@ -695,9 +729,9 @@ mod tests {
         }
 
         #[capsule]
-        fn f(ECapsule(e): ECapsule, handle: &mut impl SideEffectHandle) -> u8 {
-            handle.callonce(|| {});
-            *e
+        fn f<'a>(ECapsule(e): ECapsule, handle: impl SideEffectHandle<'a>) -> u8 {
+            handle.register(());
+            e
         }
 
         #[capsule]

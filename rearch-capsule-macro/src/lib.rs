@@ -11,30 +11,34 @@ pub fn capsule(_attr: TokenStream, item: TokenStream) -> TokenStream {
 
     let args = process_capsule_fn_params(&input, |ty| match ty {
         // A dependency capsule
-        // TODO allow an Option<&Self::T> for reader.read_self()!!
         syn::Type::Path(syn::TypePath { path, .. }) => {
-            quote! { #path(&reader.read::<#path>()) }
+            quote! { #path(reader.read::<#path>()) }
         }
+        // The capsule reader (to conditionally watch capsules and read self)
+        syn::Type::Reference(_) => quote! { reader },
         // The side effect handle
-        syn::Type::Reference(_) => quote! { handle },
+        syn::Type::ImplTrait(_) => quote! { handle },
         // We don't allow for any other type of parameters
         _ => panic!(concat!(
             "Capsule functions can only consume ",
-            "other capsules (MyCapsule(value): MyCapsule) and ",
-            "a side effect handle (use: &mut impl SideEffectHandle)"
+            "other capsules ( MyCapsule(value): MyCapsule ), ",
+            "a capsule reader ( reader: &mut impl CapsuleReader ), and ",
+            "a side effect handle ( handle: impl SideEffectHandle )"
         )),
     });
 
     let capsule_impl = quote! {
         #input
 
-        struct #capsule_name<'a>(&'a #capsule_type);
+        struct #capsule_name(#capsule_type);
 
-        impl<'a> rearch::Capsule for #capsule_name<'a> {
+        impl rearch::Capsule for #capsule_name {
             type T = #capsule_type;
 
-            fn build(reader: &mut impl rearch::CapsuleReader<Self::T>,
-                handle: &mut impl rearch::SideEffectHandle) -> Self::T {
+            fn build<'a>(
+                reader: &mut impl rearch::CapsuleReader<Self::T>,
+                handle: impl rearch::SideEffectHandle<'a>
+            ) -> Self::T {
                 #fn_name(#(#args),*)
             }
         }
@@ -67,9 +71,9 @@ pub fn factory(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let factory_type = {
         match factory_params {
             Some(ref factory_params) => {
-                quote! { std::sync::Arc<dyn Fn(#factory_params) -> #fn_type + Sync + Send> }
+                quote! { std::sync::Arc<dyn Fn(#factory_params) -> #fn_type + Send + Sync> }
             }
-            None => quote! { std::sync::Arc<dyn Fn() -> #fn_type + Sync + Send> },
+            None => quote! { std::sync::Arc<dyn Fn() -> #fn_type + Send + Sync> },
         }
     };
     let factory_args = {
@@ -83,20 +87,17 @@ pub fn factory(_attr: TokenStream, item: TokenStream) -> TokenStream {
         }
     };
 
-    // We need to store an Arc of the capsules locally to prevent a borrow on the reader
-    // (closure will close over the Arcs but not the reader)
+    // We need to store the capsules' state locally to prevent a borrow on the reader
+    // (closure will close over the capsules' state but not the reader)
     let local_capsule_vars = (0..dependencies.len()).map(|i| format_ident!("capsule_var{i}"));
     let mut capsule_count = 0;
     let args = process_capsule_fn_params(&input, move |ty| match ty {
         // A dependency capsule
-        // TODO Option<&Self::T> for reader.read_self()!!
         syn::Type::Path(syn::TypePath { path, .. }) => {
             let local_var_name = format_ident!("capsule_var{capsule_count}");
             capsule_count += 1;
-            quote! { #path(&#local_var_name) }
+            quote! { #path(#local_var_name) }
         }
-        // The side effect handle
-        syn::Type::Reference(_) => quote! { handle },
         // Factory arguments
         syn::Type::Tuple(syn::TypeTuple { elems, .. }) => {
             let num_args = elems.iter().count();
@@ -106,22 +107,23 @@ pub fn factory(_attr: TokenStream, item: TokenStream) -> TokenStream {
         // We don't allow for any other type of parameters
         _ => panic!(concat!(
             "Factory functions can only consume ",
-            "parameters to the factory function ((my_str): (String,)), ",
-            "other capsules (MyCapsule(value): MyCapsule), and ",
-            "a side effect handle (use: &mut impl SideEffectHandle)"
+            "parameters to the factory function ( (my_str): (String,) ) ",
+            "and other capsules ( MyCapsule(value): MyCapsule )",
         )),
     });
 
     let capsule_impl = quote! {
         #input
 
-        struct #factory_name<'a>(&'a #factory_type);
+        struct #factory_name(#factory_type);
 
-        impl<'a> rearch::Capsule for #factory_name<'a> {
+        impl rearch::Capsule for #factory_name {
             type T = #factory_type;
 
-            fn build(reader: &mut impl rearch::CapsuleReader<Self::T>,
-                handle: &mut impl rearch::SideEffectHandle) -> Self::T {
+            fn build<'a>(
+                reader: &mut impl rearch::CapsuleReader<Self::T>,
+                handle: impl rearch::SideEffectHandle<'a>
+            ) -> Self::T {
                 #(let #local_capsule_vars = reader.read::<#dependencies>();)*
 
                 std::sync::Arc::new(move |#factory_args| #fn_name(#(#args),*))
@@ -175,19 +177,6 @@ where
         })
 }
 
-trait StringJoin: Iterator<Item = String> {
-    fn join(self) -> String
-    where
-        Self: Sized,
-    {
-        self.fold(String::new(), |mut total, curr| {
-            total.push_str(&curr);
-            total
-        })
-    }
-}
-impl<I: Iterator<Item = String>> StringJoin for I {}
-
 fn snake_to_pascal(s: &str) -> String {
     s.split('_')
         .map(|word| {
@@ -201,5 +190,8 @@ fn snake_to_pascal(s: &str) -> String {
                 }
             }
         })
-        .join()
+        .fold(String::new(), |mut total, curr| {
+            total.push_str(&curr);
+            total
+        })
 }

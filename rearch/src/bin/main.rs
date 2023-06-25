@@ -1,4 +1,4 @@
-use rearch::{capsule, factory, BuiltinSideEffects, Container, SideEffectHandle};
+use rearch::{capsule, factory, side_effects::StateEffect, Container, SideEffectHandle};
 
 #[capsule]
 fn count() -> i32 {
@@ -34,8 +34,10 @@ fn uses_factory(BigStringFactory(factory): BigStringFactory) -> String {
 }
 
 #[capsule]
-fn stateful(handle: &mut impl SideEffectHandle) -> (u8, std::sync::Arc<dyn Fn(u8) + Sync + Send>) {
-    let (state, set_state) = handle.state(0u8);
+fn stateful<'a>(
+    handle: impl SideEffectHandle<'a>,
+) -> (u8, std::sync::Arc<dyn Fn(u8) + Sync + Send>) {
+    let (state, set_state) = handle.register(StateEffect(0));
     (*state, std::sync::Arc::new(set_state))
 }
 
