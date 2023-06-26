@@ -532,6 +532,7 @@ impl<'a> SideEffectHandle<'a> for CapsuleSideEffectHandleImpl<'a> {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
 
     /// Check for Container: Send + Sync
@@ -539,7 +540,7 @@ mod tests {
     mod container_thread_safe {
         use crate::*;
         struct SyncSendCheck<T: Send + Sync>(T);
-        fn foo(bar: SyncSendCheck<Container>) {}
+        const fn foo(bar: &SyncSendCheck<Container>) {}
     }
 
     /// Check for some fundamental functionality with the classic count example
@@ -556,7 +557,7 @@ mod tests {
             assert_eq!(
                 0,
                 container.with_read_txn(|txn| txn.try_read::<CountCapsule>().unwrap())
-            )
+            );
         }
 
         #[test]
@@ -695,6 +696,56 @@ mod tests {
     fn complex_dependency_graph() {
         use crate::{self as rearch, capsule, side_effects, Container, SideEffectHandle};
 
+        #[capsule]
+        fn stateful_a<'a>(
+            handle: impl SideEffectHandle<'a>,
+        ) -> (u8, std::sync::Arc<dyn Fn(u8) + Send + Sync>) {
+            let (state, set_state) = handle.register(side_effects::StateEffect(0));
+            (*state, std::sync::Arc::new(set_state))
+        }
+
+        #[capsule]
+        fn a(StatefulACapsule(a): StatefulACapsule) -> u8 {
+            a.0
+        }
+
+        #[capsule]
+        fn b<'a>(ACapsule(a): ACapsule, handle: impl SideEffectHandle<'a>) -> u8 {
+            handle.register(());
+            a + 1
+        }
+
+        #[capsule]
+        const fn c(BCapsule(b): BCapsule, FCapsule(f): FCapsule) -> u8 {
+            b + f
+        }
+
+        #[capsule]
+        const fn d(CCapsule(c): CCapsule) -> u8 {
+            c
+        }
+
+        #[capsule]
+        const fn e(ACapsule(a): ACapsule, HCapsule(h): HCapsule) -> u8 {
+            a + h
+        }
+
+        #[capsule]
+        fn f<'a>(ECapsule(e): ECapsule, handle: impl SideEffectHandle<'a>) -> u8 {
+            handle.register(());
+            e
+        }
+
+        #[capsule]
+        const fn g(CCapsule(c): CCapsule, FCapsule(f): FCapsule) -> u8 {
+            c + f
+        }
+
+        #[capsule]
+        const fn h() -> u8 {
+            1
+        }
+
         let container = Container::new();
         let mut read_txn_counter = 0;
 
@@ -742,55 +793,5 @@ mod tests {
         });
 
         assert_eq!(read_txn_counter, 3);
-
-        #[capsule]
-        fn stateful_a<'a>(
-            handle: impl SideEffectHandle<'a>,
-        ) -> (u8, std::sync::Arc<dyn Fn(u8) + Send + Sync>) {
-            let (state, set_state) = handle.register(side_effects::StateEffect(0));
-            (*state, std::sync::Arc::new(set_state))
-        }
-
-        #[capsule]
-        fn a(StatefulACapsule(a): StatefulACapsule) -> u8 {
-            a.0
-        }
-
-        #[capsule]
-        fn b<'a>(ACapsule(a): ACapsule, handle: impl SideEffectHandle<'a>) -> u8 {
-            handle.register(());
-            a + 1
-        }
-
-        #[capsule]
-        fn c(BCapsule(b): BCapsule, FCapsule(f): FCapsule) -> u8 {
-            b + f
-        }
-
-        #[capsule]
-        fn d(CCapsule(c): CCapsule) -> u8 {
-            c
-        }
-
-        #[capsule]
-        fn e(ACapsule(a): ACapsule, HCapsule(h): HCapsule) -> u8 {
-            a + h
-        }
-
-        #[capsule]
-        fn f<'a>(ECapsule(e): ECapsule, handle: impl SideEffectHandle<'a>) -> u8 {
-            handle.register(());
-            e
-        }
-
-        #[capsule]
-        fn g(CCapsule(c): CCapsule, FCapsule(f): FCapsule) -> u8 {
-            c + f
-        }
-
-        #[capsule]
-        fn h() -> u8 {
-            1
-        }
     }
 }
