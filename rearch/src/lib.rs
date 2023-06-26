@@ -7,7 +7,9 @@
     clippy::pedantic,
     clippy::perf,
     clippy::style,
-    clippy::suspicious
+    clippy::suspicious,
+    clippy::clone_on_ref_ptr,
+    clippy::unwrap_used
 )]
 #![feature(trait_upcasting)]
 #![feature(impl_trait_in_assoc_type)]

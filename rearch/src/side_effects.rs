@@ -67,12 +67,15 @@ impl<'a, T: Send + 'static, F: FnOnce() -> T + Send + 'static> SideEffect<'a>
         self.0.get_or_init(|| {
             std::mem::take(&mut self.1).expect("Init fn should be present for state init")()
         });
-        (self.0.get_mut().unwrap(), move |new_state| {
-            rebuild(Box::new(|effect| {
-                effect.0.take();
-                _ = effect.0.set(new_state);
-            }));
-        })
+        (
+            self.0.get_mut().expect("'State initialized above"),
+            move |new_state| {
+                rebuild(Box::new(|effect| {
+                    effect.0.take();
+                    _ = effect.0.set(new_state);
+                }));
+            },
+        )
     }
 }
 
@@ -107,7 +110,7 @@ impl<'a, T: Send + 'static, F: FnOnce() -> T + Send + 'static> SideEffect<'a>
         self.0.get_or_init(|| {
             std::mem::take(&mut self.1).expect("Init fn should be present for state init")()
         });
-        self.0.get_mut().unwrap()
+        self.0.get_mut().expect("State initialized above")
     }
 }
 
@@ -227,7 +230,7 @@ where
             rebuild(Box::new(move |effect| mutation(&mut effect.data)));
         }));
 
-        let write = write.clone();
+        let write = Arc::clone(write);
         let persist = move |new_data| {
             let persist_result = write(new_data);
             set_state(persist_result);
