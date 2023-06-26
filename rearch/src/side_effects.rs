@@ -1,42 +1,38 @@
-use std::cell::OnceCell;
+use std::{cell::OnceCell, marker::PhantomData, sync::Arc};
 
 use crate::{SideEffect, SideEffectRebuilder};
 
 type Rebuilder<T> = Box<dyn SideEffectRebuilder<T>>;
 
-// TODO make macro_rules! from these two
-impl SideEffect<'_> for () {
-    type Api = ();
-    fn api(&mut self, _: Rebuilder<Self>) -> Self::Api {}
-}
-impl<'a, A: SideEffect<'a>, B: SideEffect<'a>> SideEffect<'a> for (A, B) {
-    type Api = (A::Api, B::Api);
+macro_rules! generate_tuple_side_effect_impl {
+    ($($types:ident),*) => {
+        impl<'a, $($types: SideEffect<'a>),*> SideEffect<'a> for ($($types),*) {
+            type Api = ($($types::Api),*);
 
-    #[allow(unused_variables)]
-    fn api(&'a mut self, rebuild: Rebuilder<Self>) -> Self::Api {
-        let a_rebuilder: Box<dyn SideEffectRebuilder<A>> = {
-            let rebuild = rebuild.clone();
-            Box::new(move |state_setter| {
-                rebuild(Box::new(move |store: &mut Self| {
-                    let (ref mut a_store, ref mut b_store) = store;
-                    state_setter(a_store)
-                }))
-            })
-        };
-        let b_rebuilder: Box<dyn SideEffectRebuilder<B>> = {
-            let rebuild = rebuild.clone();
-            Box::new(move |state_setter| {
-                rebuild(Box::new(move |store: &mut Self| {
-                    let (ref mut a_store, ref mut b_store) = store;
-                    state_setter(b_store)
-                }))
-            })
-        };
-
-        let (a_effect, b_effect) = self;
-        (a_effect.api(a_rebuilder), b_effect.api(b_rebuilder))
-    }
+            #[allow(unused_variables)]
+            fn api(&'a mut self, rebuild: Rebuilder<Self>) -> Self::Api {
+                ($(
+                    self.${index()}.api({
+                        let rebuild = rebuild.clone();
+                        let rebuild: Rebuilder<$types> = Box::new(move |mutation| rebuild(
+                            Box::new(move |store| mutation(&mut store.${index()}))
+                        ));
+                        rebuild
+                    })
+                ),*)
+            }
+        }
+    };
 }
+
+generate_tuple_side_effect_impl!();
+generate_tuple_side_effect_impl!(A, B);
+generate_tuple_side_effect_impl!(A, B, C);
+generate_tuple_side_effect_impl!(A, B, C, D);
+generate_tuple_side_effect_impl!(A, B, C, D, E);
+generate_tuple_side_effect_impl!(A, B, C, D, E, F);
+generate_tuple_side_effect_impl!(A, B, C, D, E, F, G);
+generate_tuple_side_effect_impl!(A, B, C, D, E, F, G, H);
 
 pub struct StateEffect<T>(pub T);
 impl<T> StateEffect<T> {
@@ -129,8 +125,8 @@ impl RebuilderEffect {
 impl SideEffect<'_> for RebuilderEffect {
     type Api = impl Fn() + Clone + Send + Sync;
 
-    fn api(&mut self, rebuilder: Rebuilder<Self>) -> Self::Api {
-        move || rebuilder(Box::new(|_| ()))
+    fn api(&mut self, rebuild: Rebuilder<Self>) -> Self::Api {
+        move || rebuild(Box::new(|_| ()))
     }
 }
 
@@ -190,6 +186,74 @@ impl SideEffect<'_> for IsFirstBuildEffect {
     }
 }
 
+/// A thin wrapper around the state side effect that enables easy state persistence.
+///
+/// You provide a `read` function and a `write` function,
+/// and you receive the status of the latest read/write operation,
+/// in addition to a persist function that persists new state and triggers rebuilds.
+///
+/// Note: when possible, it is highly recommended to use async persist instead of sync persist.
+/// This effect is blocking, which will prevent other capsule updates.
+/// However, this function is perfect for quick I/O, like when using something similar to redb.
+pub struct SyncPersistEffect<Read: FnOnce() -> R, Write, R, T> {
+    data: (LazyStateEffect<R, Read>, ValueEffect<Arc<Write>>),
+    ghost: PhantomData<T>,
+}
+impl<Read: FnOnce() -> R, Write, R, T> SyncPersistEffect<Read, Write, R, T> {
+    pub fn new(read: Read, write: Write) -> Self {
+        Self {
+            data: (
+                LazyStateEffect::new(read),
+                ValueEffect::new(Arc::new(write)),
+            ),
+            ghost: PhantomData,
+        }
+    }
+}
+impl<'a, Read, Write, R, T> SideEffect<'a> for SyncPersistEffect<Read, Write, R, T>
+where
+    T: Send + 'static,
+    R: Send + 'static,
+    Read: FnOnce() -> R + Send + 'static,
+    Write: Fn(T) -> R + Send + Sync + 'static,
+{
+    type Api = (&'a R, impl Fn(T) + Send + Sync + Clone + 'static);
+
+    fn api(&'a mut self, rebuild: Rebuilder<Self>) -> Self::Api {
+        let ((state, set_state), write) = self.data.api(Box::new(move |mutation| {
+            rebuild(Box::new(move |effect| mutation(&mut effect.data)))
+        }));
+
+        let write = write.clone();
+        let persist = move |new_data| {
+            let persist_result = write(new_data);
+            set_state(persist_result);
+        };
+
+        (state, persist)
+    }
+}
+// TODO manually defining the SideEffect trait impl is a PITA,
+// so we should provide a proc macro that generates a impl SideEffect<'a> from the following:
+//
+// #[side_effect(SyncPersistEffect<Read, Write, R, T>, (effect.data))]
+// fn sync_persist_effect_api<'a, Read, Write, R, T>(
+//     ((state, set_state), write): SyncPersistEffectInnerApi,
+// ) -> (&'a R, impl Fn(T) + Send + Sync + Clone + 'static)
+// where
+//     T: Send + 'static,
+//     R: Send + 'static,
+//     Read: FnOnce() -> R + Send + 'static,
+//     Write: Fn(T) -> R + Send + Sync + 'static,
+// {
+//     let write = write.clone();
+//     let persist = move |new_data| {
+//         let persist_result = write(new_data);
+//         set_state(persist_result);
+//     };
+//     (state, persist)
+// }
+
 /*
 #[cfg(feature = "tokio-side-effects")]
 fn future_from_fn<R, Future>(
@@ -236,28 +300,6 @@ where
     Future: std::future::Future<Output = R> + Send + 'static,
 {
     self.future_from_fn(|| future, dependencies)
-}
-
-/// A thin wrapper around the state side effect that enables easy state persistence.
-///
-/// You provide a `read` function and a `write` function,
-/// and you receive of status of the latest read/write operation,
-/// in addition to a persist function that persists new state and triggers rebuilds.
-///
-/// Note: when possible, it is highly recommended to use async_persist instead of sync_persist.
-/// This function is blocking, which will prevent other capsule updates.
-/// However, this function is perfect for quick I/O, like when using something similar to redb.
-fn sync_persist<T, R: Send + Sync + 'static>(
-    &mut self,
-    read: impl FnOnce() -> R,
-    write: impl Fn(T) -> R + Send + Sync + 'static,
-) -> (Arc<R>, impl Fn(T) + Send + Sync + 'static) {
-    let (state, set_state) = self.state_from_fn(read);
-    let persist = move |new_data| {
-        let persist_result = write(new_data);
-        set_state(persist_result);
-    };
-    (state, persist)
 }
 
 #[cfg(feature = "tokio-side-effects")]
@@ -480,61 +522,6 @@ mod async_state {
                 Self::Loading(previous_data) => Self::Loading(previous_data.clone()),
                 Self::Complete(data) => Self::Complete(data.clone()),
             }
-        }
-    }
-}
-
-pub trait DependencyList: Send + Sync + 'static {
-    fn eq(&self, other: &Self) -> bool;
-}
-
-impl<DL: DependencyList> DependencyList for Arc<DL> {
-    fn eq(&self, other: &Self) -> bool {
-        let s: &DL = self;
-        s.eq(other)
-    }
-}
-
-macro_rules! generate_dep_list_impl {
-    ($($type:ident),*) => {
-        paste::paste! {
-            impl<$($type: Eq + Send + Sync + 'static),*> DependencyList for ($($type,)*) {
-                #[allow(non_snake_case, unused_parens)]
-                fn eq(&self, other: &Self) -> bool {
-                    let ($([<s_ $type>]),*) = self;
-                    let ($([<o_ $type>]),*) = other;
-                    true $(&& [<s_ $type>] == [<o_ $type>])*
-                }
-            }
-        }
-    };
-}
-
-generate_dep_list_impl!();
-generate_dep_list_impl!(A);
-generate_dep_list_impl!(A, B);
-generate_dep_list_impl!(A, B, C);
-generate_dep_list_impl!(A, B, C, D);
-generate_dep_list_impl!(A, B, C, D, E);
-generate_dep_list_impl!(A, B, C, D, E, F);
-generate_dep_list_impl!(A, B, C, D, E, F, G);
-generate_dep_list_impl!(A, B, C, D, E, F, G, H);
-generate_dep_list_impl!(A, B, C, D, E, F, G, H, I);
-generate_dep_list_impl!(A, B, C, D, E, F, G, H, I, J);
-
-#[cfg(test)]
-mod tests {
-    #[allow(dead_code)]
-    mod dep_lists_signatures_compile {
-        use crate::DependencyList;
-        fn a() -> impl DependencyList {
-            (1,)
-        }
-        fn b() -> impl DependencyList {
-            (1, "", true)
-        }
-        fn c() -> impl DependencyList {
-            // () implicitly returned
         }
     }
 }

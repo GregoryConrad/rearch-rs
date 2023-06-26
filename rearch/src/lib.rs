@@ -1,5 +1,6 @@
 #![feature(trait_upcasting)]
 #![feature(impl_trait_in_assoc_type)]
+#![feature(macro_metavar_expr)]
 use concread::hashmap::{HashMapReadTxn, HashMapWriteTxn};
 use dyn_clone::DynClone;
 use std::{
@@ -69,6 +70,9 @@ pub trait Capsule {
     /// Doing so will result in a deadlock.
     fn build<'a>(
         reader: &mut impl CapsuleReader<Self::T>,
+        // TODO experiment with removing the side effect handle, instead opting for
+        // another method that inits the side effects (possibly with a CapsuleReader)
+        // and then just passing the Capsule's Self::SideEffectApi here.
         handle: impl SideEffectHandle<'a>,
     ) -> Self::T;
 }
@@ -112,10 +116,11 @@ pub trait SideEffect<'a>: Send + 'static {
     /// Construct this side effect's build api, given:
     /// - A mutable reference to the current state of this side effect (&mut self)
     /// - A mechanism to trigger rebuilds that can also update the state of this side effect
-    fn api(&'a mut self, rebuilder: Box<dyn SideEffectRebuilder<Self>>) -> Self::Api;
+    fn api(&'a mut self, rebuild: Box<dyn SideEffectRebuilder<Self>>) -> Self::Api;
 }
 
 // Using a trait object here to prevent a sea of complicated generics everywhere
+// TODO maybe try making this static dispatch again? Box<dyn ...> everywhere has been tedious.
 pub trait SideEffectRebuilder<S>:
     Fn(Box<dyn FnOnce(&mut S)>) + Send + Sync + DynClone + 'static
 {
