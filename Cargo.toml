@@ -10,6 +10,7 @@ repository = "https://github.com/GregoryConrad/rearch-rs"
 keywords = ["design", "architecture", "reactive", "immutable", "dependency-injection"]
 categories = ["caching", "concurrency"]
 authors = ["Gregory Conrad <contact@gsconrad.com>"]
+readme = "README.md"
 
 [workspace.dependencies]
 rearch-capsule-macro = { path = "rearch-capsule-macro", version = "0.*" }

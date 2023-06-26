@@ -9,7 +9,7 @@ macro_rules! generate_tuple_side_effect_impl {
         impl<'a, $($types: SideEffect<'a>),*> SideEffect<'a> for ($($types),*) {
             type Api = ($($types::Api),*);
 
-            #[allow(unused_variables)]
+            #[allow(unused_variables, clippy::unused_unit)]
             fn api(&'a mut self, rebuild: Rebuilder<Self>) -> Self::Api {
                 ($(
                     self.${index()}.api({
@@ -36,7 +36,7 @@ generate_tuple_side_effect_impl!(A, B, C, D, E, F, G, H);
 
 pub struct StateEffect<T>(pub T);
 impl<T> StateEffect<T> {
-    pub fn new(default: T) -> Self {
+    pub const fn new(default: T) -> Self {
         Self(default)
     }
 }
@@ -45,7 +45,7 @@ impl<'a, T: Send + 'static> SideEffect<'a> for StateEffect<T> {
 
     fn api(&'a mut self, rebuild: Rebuilder<Self>) -> Self::Api {
         (&mut self.0, move |new_state| {
-            rebuild(Box::new(|effect| effect.0 = new_state))
+            rebuild(Box::new(|effect| effect.0 = new_state));
         })
     }
 }
@@ -54,7 +54,7 @@ impl<'a, T: Send + 'static> SideEffect<'a> for StateEffect<T> {
 // see https://github.com/rust-lang/rust/issues/109736#issuecomment-1605787094
 pub struct LazyStateEffect<T, F: FnOnce() -> T>(OnceCell<T>, Option<F>);
 impl<T, F: FnOnce() -> T> LazyStateEffect<T, F> {
-    pub fn new(default: F) -> Self {
+    pub const fn new(default: F) -> Self {
         Self(OnceCell::new(), Some(default))
     }
 }
@@ -71,14 +71,14 @@ impl<'a, T: Send + 'static, F: FnOnce() -> T + Send + 'static> SideEffect<'a>
             rebuild(Box::new(|effect| {
                 effect.0.take();
                 _ = effect.0.set(new_state);
-            }))
+            }));
         })
     }
 }
 
 pub struct ValueEffect<T>(pub T);
 impl<T> ValueEffect<T> {
-    pub fn new(value: T) -> Self {
+    pub const fn new(value: T) -> Self {
         Self(value)
     }
 }
@@ -94,7 +94,7 @@ impl<'a, T: Send + 'static> SideEffect<'a> for ValueEffect<T> {
 // see https://github.com/rust-lang/rust/issues/109736#issuecomment-1605787094
 pub struct LazyValueEffect<T, F: FnOnce() -> T>(OnceCell<T>, Option<F>);
 impl<T, F: FnOnce() -> T> LazyValueEffect<T, F> {
-    pub fn new(init: F) -> Self {
+    pub const fn new(init: F) -> Self {
         Self(OnceCell::new(), Some(init))
     }
 }
@@ -118,8 +118,9 @@ impl<'a, T: Send + 'static, F: FnOnce() -> T + Send + 'static> SideEffect<'a>
 #[derive(Default)]
 pub struct RebuilderEffect;
 impl RebuilderEffect {
-    pub fn new() -> Self {
-        Default::default()
+    #[must_use]
+    pub const fn new() -> Self {
+        Self
     }
 }
 impl SideEffect<'_> for RebuilderEffect {
@@ -141,8 +142,9 @@ impl<F: FnOnce()> Default for RunOnChangeEffect<F> {
     }
 }
 impl<F: FnOnce()> RunOnChangeEffect<F> {
+    #[must_use]
     pub fn new() -> Self {
-        Default::default()
+        Self::default()
     }
 }
 impl<F: FnOnce()> Drop for RunOnChangeEffect<F> {
@@ -172,8 +174,9 @@ pub struct IsFirstBuildEffect {
     has_built: bool,
 }
 impl IsFirstBuildEffect {
+    #[must_use]
     pub fn new() -> Self {
-        Default::default()
+        Self::default()
     }
 }
 impl SideEffect<'_> for IsFirstBuildEffect {
@@ -221,7 +224,7 @@ where
 
     fn api(&'a mut self, rebuild: Rebuilder<Self>) -> Self::Api {
         let ((state, set_state), write) = self.data.api(Box::new(move |mutation| {
-            rebuild(Box::new(move |effect| mutation(&mut effect.data)))
+            rebuild(Box::new(move |effect| mutation(&mut effect.data)));
         }));
 
         let write = write.clone();

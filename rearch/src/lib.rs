@@ -1,3 +1,14 @@
+#![warn(
+    clippy::all,
+    clippy::cargo,
+    clippy::complexity,
+    clippy::correctness,
+    clippy::nursery,
+    clippy::pedantic,
+    clippy::perf,
+    clippy::style,
+    clippy::suspicious
+)]
 #![feature(trait_upcasting)]
 #![feature(impl_trait_in_assoc_type)]
 #![feature(macro_metavar_expr)]
@@ -64,7 +75,7 @@ pub trait Capsule {
     type T: CapsuleType;
 
     /// Builds the capsule's immutable data using a given snapshot of the data flow graph.
-    /// (The snapshot, a ContainerWriteTxn, is abstracted away for you.)
+    /// (The snapshot, a `ContainerWriteTxn`, is abstracted away for you.)
     ///
     /// ABSOLUTELY DO NOT TRIGGER ANY REBUILDS WITHIN THIS FUNCTION!
     /// Doing so will result in a deadlock.
@@ -142,8 +153,9 @@ impl Container {
     ///
     /// Containers contain no data when first created.
     /// Use `read!()` to populate and read some capsules!
+    #[must_use]
     pub fn new() -> Self {
-        Container(Arc::new(ContainerStore::default()))
+        Self(Arc::new(ContainerStore::default()))
     }
 
     /// Runs the supplied callback with a `ContainerReadTxn` that allows you to read
@@ -167,7 +179,7 @@ impl Container {
     ///
     /// ABSOLUTELY DO NOT trigger any capsule side effects (i.e., rebuilds) in the callback!
     /// This will result in a deadlock, and no future write transactions will be permitted.
-    /// You can always trigger a rebuild in a new thread or after the ContainerWriteTxn drops.
+    /// You can always trigger a rebuild in a new thread or after the `ContainerWriteTxn` drops.
     pub fn with_write_txn<R>(&self, to_run: impl FnOnce(&mut ContainerWriteTxn) -> R) -> R {
         let rebuilder = CapsuleRebuilder(Arc::downgrade(&self.0));
         self.0.with_write_txn(rebuilder, to_run)
@@ -221,6 +233,7 @@ impl ContainerStore {
 struct CapsuleRebuilder(Weak<ContainerStore>);
 impl CapsuleRebuilder {
     fn rebuild(&self, id: TypeId, mutation: impl FnOnce(&mut CapsuleManager)) {
+        #[allow(clippy::option_if_let_else)]
         if let Some(store) = self.0.upgrade() {
             #[cfg(feature = "logging")]
             log::debug!("Rebuilding Capsule ({:?})", id);
@@ -231,7 +244,7 @@ impl CapsuleRebuilder {
             store.with_write_txn(self.clone(), |txn| {
                 // We have the txn now, so that means we also hold the data & nodes lock.
                 // Thus, this is where we should run the supplied mutation.
-                mutation(txn.node_or_panic(&id));
+                mutation(txn.node_or_panic(id));
                 txn.build_capsule_or_panic(id);
             });
         } else {
@@ -248,6 +261,7 @@ pub struct ContainerReadTxn<'a> {
     data: HashMapReadTxn<'a, TypeId, Box<dyn CapsuleType>>,
 }
 impl ContainerReadTxn<'_> {
+    #[must_use]
     pub fn try_read<C: Capsule + 'static>(&self) -> Option<C::T> {
         let id = TypeId::of::<C>();
         self.data.get(&id).map(|data| {
@@ -265,6 +279,7 @@ pub struct ContainerWriteTxn<'a> {
     rebuilder: CapsuleRebuilder,
 }
 impl ContainerWriteTxn<'_> {
+    #[must_use]
     pub fn try_read<C: Capsule + 'static>(&self) -> Option<C::T> {
         let id = TypeId::of::<C>();
         self.data.get(&id).map(|data| {
@@ -303,31 +318,35 @@ impl ContainerWriteTxn<'_> {
 
     /// Forcefully builds the capsule with the supplied id. Panics if node is not in the graph
     fn build_capsule_or_panic(&mut self, id: TypeId) {
-        self.build_single_node(&id);
+        self.build_single_node(id);
 
         // Since we have already built the node above (since *it must be built in this method*),
         // we can skip it with skip(1) when we are handling the rest of the dependent subgraph
-        let build_order = self.create_build_order_stack(id).into_iter().rev().skip(1);
-        let build_order = self.garbage_collect_diposable_nodes(build_order);
-        build_order.for_each(|id| self.build_single_node(&id));
+        let build_order = {
+            let build_order = self.create_build_order_stack(id).into_iter().rev().skip(1);
+            self.garbage_collect_diposable_nodes(build_order)
+        };
+        for id in build_order {
+            self.build_single_node(id);
+        }
     }
 
     /// Gets the requested node or panics if it is not in the graph
-    fn node_or_panic(&mut self, id: &TypeId) -> &mut CapsuleManager {
+    fn node_or_panic(&mut self, id: TypeId) -> &mut CapsuleManager {
         self.nodes
-            .get_mut(id)
+            .get_mut(&id)
             .expect("Requested node should be in the graph")
     }
 
     /// Builds only the requested node. Panics if node is not in the graph
-    fn build_single_node(&mut self, id: &TypeId) {
+    fn build_single_node(&mut self, id: TypeId) {
         // Remove old dependency info since it may change on this build
         // We use std::mem::take below to prevent needing a clone on the existing dependencies
         let node = self.node_or_panic(id);
         let old_deps = std::mem::take(&mut node.dependencies);
-        old_deps.iter().for_each(|dep| {
-            self.node_or_panic(dep).dependents.remove(id);
-        });
+        for dep in old_deps {
+            self.node_or_panic(dep).dependents.remove(&id);
+        }
 
         // Trigger the build (which also populates its new dependencies in self)
         (self.node_or_panic(id).build)(self);
@@ -351,7 +370,7 @@ impl ContainerWriteTxn<'_> {
                 // New node, so mark this node to be added later and process dependents
                 visited.insert(node);
                 to_visit_stack.push((true, node)); // mark node to be added to build order later
-                self.node_or_panic(&node)
+                self.node_or_panic(node)
                     .dependents
                     .iter()
                     .copied()
@@ -363,7 +382,7 @@ impl ContainerWriteTxn<'_> {
         build_order_stack
     }
 
-    /// Helper function that given a build_order, garbage collects all super pure nodes
+    /// Helper function that given a `build_order`, garbage collects all super pure nodes
     /// that have no dependents (i.e., they are entirely disposable)
     /// and returns the new build order without the (now garbage collected) super pure nodes.
     /// While the build order specifies the order in which nodes must be built in to propagate
@@ -376,13 +395,17 @@ impl ContainerWriteTxn<'_> {
         let mut non_disposable = Vec::new();
 
         build_order.rev().for_each(|id| {
-            let is_disposable = self.node_or_panic(&id).is_disposable();
+            let is_disposable = self.node_or_panic(id).is_disposable();
             if is_disposable {
                 self.data.remove(&id);
-                let node = self.nodes.remove(&id).expect("Node should be in graph");
-                node.dependencies.iter().for_each(|dep| {
-                    self.node_or_panic(dep).dependents.remove(&id);
-                });
+                self.nodes
+                    .remove(&id)
+                    .expect("Node should be in graph")
+                    .dependencies
+                    .iter()
+                    .for_each(|dep| {
+                        self.node_or_panic(*dep).dependents.remove(&id);
+                    });
             } else {
                 non_disposable.push(id);
             }
@@ -405,7 +428,7 @@ struct CapsuleManager {
 }
 impl CapsuleManager {
     fn new<C: Capsule + 'static>(rebuilder: CapsuleRebuilder) -> Self {
-        CapsuleManager {
+        Self {
             dependencies: HashSet::new(),
             dependents: HashSet::new(),
             side_effect_data: OnceCell::new(),
@@ -420,7 +443,7 @@ impl CapsuleManager {
         #[cfg(feature = "logging")]
         log::trace!("Building {} ({:?})", std::any::type_name::<C>(), id);
 
-        let manager = txn.node_or_panic(&id);
+        let manager = txn.node_or_panic(id);
         let rebuilder = manager.rebuilder.clone();
         let mut side_effect_data = std::mem::take(&mut manager.side_effect_data);
 
@@ -436,7 +459,7 @@ impl CapsuleManager {
             },
         );
 
-        let manager = txn.node_or_panic(&id);
+        let manager = txn.node_or_panic(id);
         manager.side_effect_data = side_effect_data;
 
         txn.data.insert(id, Box::new(new_data));
@@ -455,19 +478,18 @@ struct CapsuleReaderImpl<'txn_scope, 'txn_total, C: Capsule + 'static> {
 impl<C: Capsule + 'static> CapsuleReader<C::T> for CapsuleReaderImpl<'_, '_, C> {
     fn read<O: Capsule + 'static>(&mut self) -> O::T {
         let (this, other) = (TypeId::of::<C>(), TypeId::of::<O>());
-        if this == other {
-            panic!(concat!(
-                "A capsule tried depending upon itself (which isn't allowed)! ",
-                "To read the current value of a capsule, instead use CapsuleReader::read_self()."
-            ))
-        }
+        assert_ne!(
+            this, other,
+            "A capsule tried depending upon itself (which isn't allowed)! {}",
+            "To read the current value of a capsule, instead use CapsuleReader::read_self()."
+        );
 
         // Get the value (and make sure the other manager is initialized!)
         let data = self.txn.read_or_init::<O>();
 
         // Take care of some dependency housekeeping
-        self.txn.node_or_panic(&other).dependents.insert(this);
-        self.txn.node_or_panic(&this).dependencies.insert(other);
+        self.txn.node_or_panic(other).dependents.insert(this);
+        self.txn.node_or_panic(this).dependencies.insert(other);
 
         data
     }
@@ -502,7 +524,7 @@ impl<'a> SideEffectHandle<'a> for CapsuleSideEffectHandleImpl<'a> {
                     .downcast_mut::<Effect>()
                     .expect("A SideEffectHandle's registered SideEffect cannot be changed!");
                 mutation(effect);
-            })
+            });
         }))
     }
 }
