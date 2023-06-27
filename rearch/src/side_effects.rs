@@ -6,11 +6,11 @@ type Rebuilder<T> = Box<dyn SideEffectRebuilder<T>>;
 
 macro_rules! generate_tuple_side_effect_impl {
     ($($types:ident),*) => {
-        impl<'a, $($types: SideEffect<'a>),*> SideEffect<'a> for ($($types),*) {
-            type Api = ($($types::Api),*);
+        impl<$($types: SideEffect),*> SideEffect for ($($types),*) {
+            type Api<'a> = ($($types::Api<'a>),*);
 
             #[allow(unused_variables, clippy::unused_unit)]
-            fn api(&'a mut self, rebuild: Rebuilder<Self>) -> Self::Api {
+            fn api(&mut self, rebuild: Rebuilder<Self>) -> Self::Api<'_> {
                 ($(
                     self.${index()}.api({
                         let rebuild = rebuild.clone();
@@ -34,16 +34,17 @@ generate_tuple_side_effect_impl!(A, B, C, D, E, F);
 generate_tuple_side_effect_impl!(A, B, C, D, E, F, G);
 generate_tuple_side_effect_impl!(A, B, C, D, E, F, G, H);
 
-pub struct StateEffect<T>(pub T);
+// TODO consider making effects with api callbacks return Box<dyn Fn> so that they support tests
+pub struct StateEffect<T>(T);
 impl<T> StateEffect<T> {
     pub const fn new(default: T) -> Self {
         Self(default)
     }
 }
-impl<'a, T: Send + 'static> SideEffect<'a> for StateEffect<T> {
-    type Api = (&'a mut T, impl Fn(T) + Send + Sync + Clone + 'static);
+impl<T: Send + 'static> SideEffect for StateEffect<T> {
+    type Api<'a> = (&'a mut T, impl Fn(T) + Send + Sync + Clone + 'static);
 
-    fn api(&'a mut self, rebuild: Rebuilder<Self>) -> Self::Api {
+    fn api(&mut self, rebuild: Rebuilder<Self>) -> Self::Api<'_> {
         (&mut self.0, move |new_state| {
             rebuild(Box::new(|effect| effect.0 = new_state));
         })
@@ -58,12 +59,10 @@ impl<T, F: FnOnce() -> T> LazyStateEffect<T, F> {
         Self(OnceCell::new(), Some(default))
     }
 }
-impl<'a, T: Send + 'static, F: FnOnce() -> T + Send + 'static> SideEffect<'a>
-    for LazyStateEffect<T, F>
-{
-    type Api = (&'a mut T, impl Fn(T) + Send + Sync + Clone + 'static);
+impl<T: Send + 'static, F: FnOnce() -> T + Send + 'static> SideEffect for LazyStateEffect<T, F> {
+    type Api<'a> = (&'a mut T, impl Fn(T) + Send + Sync + Clone + 'static);
 
-    fn api(&'a mut self, rebuild: Rebuilder<Self>) -> Self::Api {
+    fn api(&mut self, rebuild: Rebuilder<Self>) -> Self::Api<'_> {
         self.0.get_or_init(|| {
             std::mem::take(&mut self.1).expect("Init fn should be present for state init")()
         });
@@ -79,16 +78,16 @@ impl<'a, T: Send + 'static, F: FnOnce() -> T + Send + 'static> SideEffect<'a>
     }
 }
 
-pub struct ValueEffect<T>(pub T);
+pub struct ValueEffect<T>(T);
 impl<T> ValueEffect<T> {
     pub const fn new(value: T) -> Self {
         Self(value)
     }
 }
-impl<'a, T: Send + 'static> SideEffect<'a> for ValueEffect<T> {
-    type Api = &'a mut T;
+impl<T: Send + 'static> SideEffect for ValueEffect<T> {
+    type Api<'a> = &'a mut T;
 
-    fn api(&'a mut self, _: Rebuilder<Self>) -> Self::Api {
+    fn api(&mut self, _: Rebuilder<Self>) -> Self::Api<'_> {
         &mut self.0
     }
 }
@@ -101,12 +100,10 @@ impl<T, F: FnOnce() -> T> LazyValueEffect<T, F> {
         Self(OnceCell::new(), Some(init))
     }
 }
-impl<'a, T: Send + 'static, F: FnOnce() -> T + Send + 'static> SideEffect<'a>
-    for LazyValueEffect<T, F>
-{
-    type Api = &'a mut T;
+impl<T: Send + 'static, F: FnOnce() -> T + Send + 'static> SideEffect for LazyValueEffect<T, F> {
+    type Api<'a> = &'a mut T;
 
-    fn api(&'a mut self, _: Rebuilder<Self>) -> Self::Api {
+    fn api(&mut self, _: Rebuilder<Self>) -> Self::Api<'_> {
         self.0.get_or_init(|| {
             std::mem::take(&mut self.1).expect("Init fn should be present for state init")()
         });
@@ -126,10 +123,10 @@ impl RebuilderEffect {
         Self
     }
 }
-impl SideEffect<'_> for RebuilderEffect {
-    type Api = impl Fn() + Clone + Send + Sync;
+impl SideEffect for RebuilderEffect {
+    type Api<'a> = impl Fn() + Clone + Send + Sync;
 
-    fn api(&mut self, rebuild: Rebuilder<Self>) -> Self::Api {
+    fn api(&mut self, rebuild: Rebuilder<Self>) -> Self::Api<'_> {
         move || rebuild(Box::new(|_| ()))
     }
 }
@@ -157,10 +154,10 @@ impl<F: FnOnce()> Drop for RunOnChangeEffect<F> {
         }
     }
 }
-impl<'a, F: FnOnce() + Send + 'static> SideEffect<'a> for RunOnChangeEffect<F> {
-    type Api = impl Fn(F) + 'a;
+impl<F: FnOnce() + Send + 'static> SideEffect for RunOnChangeEffect<F> {
+    type Api<'a> = impl Fn(F) + 'a;
 
-    fn api(&'a mut self, _: Rebuilder<Self>) -> Self::Api {
+    fn api(&mut self, _: Rebuilder<Self>) -> Self::Api<'_> {
         let cell = std::cell::RefCell::new(self); // so Api doesn't need to be FnMut
         move |new_effect| {
             let mut effect = cell.borrow_mut();
@@ -182,10 +179,10 @@ impl IsFirstBuildEffect {
         Self::default()
     }
 }
-impl SideEffect<'_> for IsFirstBuildEffect {
-    type Api = bool;
+impl SideEffect for IsFirstBuildEffect {
+    type Api<'a> = bool;
 
-    fn api(&mut self, _: Rebuilder<Self>) -> Self::Api {
+    fn api(&mut self, _: Rebuilder<Self>) -> Self::Api<'_> {
         let is_first_build = !self.has_built;
         self.has_built = true;
         is_first_build
@@ -216,16 +213,16 @@ impl<Read: FnOnce() -> R, Write, R, T> SyncPersistEffect<Read, Write, R, T> {
         }
     }
 }
-impl<'a, Read, Write, R, T> SideEffect<'a> for SyncPersistEffect<Read, Write, R, T>
+impl<Read, Write, R, T> SideEffect for SyncPersistEffect<Read, Write, R, T>
 where
     T: Send + 'static,
     R: Send + 'static,
     Read: FnOnce() -> R + Send + 'static,
     Write: Fn(T) -> R + Send + Sync + 'static,
 {
-    type Api = (&'a R, impl Fn(T) + Send + Sync + Clone + 'static);
+    type Api<'a> = (&'a R, impl Fn(T) + Send + Sync + Clone + 'static);
 
-    fn api(&'a mut self, rebuild: Rebuilder<Self>) -> Self::Api {
+    fn api(&mut self, rebuild: Rebuilder<Self>) -> Self::Api<'_> {
         let ((state, set_state), write) = self.data.api(Box::new(move |mutation| {
             rebuild(Box::new(move |effect| mutation(&mut effect.data)));
         }));
@@ -244,7 +241,7 @@ where
 //
 // #[side_effect(SyncPersistEffect<Read, Write, R, T>, (effect.data))]
 // fn sync_persist_effect_api<'a, Read, Write, R, T>(
-//     ((state, set_state), write): SyncPersistEffectInnerApi,
+//     ((state, set_state), write): SyncPersistEffectInnerApi<'a>,
 // ) -> (&'a R, impl Fn(T) + Send + Sync + Clone + 'static)
 // where
 //     T: Send + 'static,

@@ -24,9 +24,7 @@ use std::{
     sync::{Arc, Mutex, Weak},
 };
 
-/// Re-export capsule macro
-#[cfg(feature = "capsule-macro")]
-pub use rearch_capsule_macro::{capsule, factory};
+pub use rearch_macros::{capsule, factory};
 
 pub mod side_effects;
 
@@ -83,9 +81,6 @@ pub trait Capsule {
     /// Doing so will result in a deadlock.
     fn build<'a>(
         reader: &mut impl CapsuleReader<Self::T>,
-        // TODO experiment with removing the side effect handle, instead opting for
-        // another method that inits the side effects (possibly with a CapsuleReader)
-        // and then just passing the Capsule's Self::SideEffectApi here.
         handle: impl SideEffectHandle<'a>,
     ) -> Self::T;
 }
@@ -108,7 +103,7 @@ pub trait SideEffectHandle<'a> {
     /// Registers the given side effect and returns its build api.
     /// You can only call register once on purpose (it consumes self);
     /// to register multiple side effects, pass them in together as a tuple.
-    fn register<Effect: SideEffect<'a>>(self, effect: Effect) -> Effect::Api;
+    fn register<Effect: SideEffect>(self, effect: Effect) -> Effect::Api<'a>;
 }
 
 /// Represents a side effect that can be utilized within the build method.
@@ -116,7 +111,7 @@ pub trait SideEffectHandle<'a> {
 /// - Has its own private state (including composing other side effects together)
 /// - Presents some api to the build method, probably including a way to rebuild & update its state
 // SideEffect needs a lifetime so that `Api` can contain a lifetime as well (if it needs to)
-pub trait SideEffect<'a>: Send + 'static {
+pub trait SideEffect: Send + 'static {
     /// The type exposed in the capsule build function when this side effect is registered;
     /// in other words, this is the api exposed by the side effect.
     ///
@@ -124,12 +119,14 @@ pub trait SideEffect<'a>: Send + 'static {
     /// - Data and/or state in this side effect
     /// - Function callbacks (perhaps to trigger a rebuild and/or update the side effect state)
     /// - Anything else imaginable!
-    type Api;
+    type Api<'a>
+    where
+        Self: 'a;
 
     /// Construct this side effect's build api, given:
     /// - A mutable reference to the current state of this side effect (&mut self)
     /// - A mechanism to trigger rebuilds that can also update the state of this side effect
-    fn api(&'a mut self, rebuild: Box<dyn SideEffectRebuilder<Self>>) -> Self::Api;
+    fn api(&mut self, rebuild: Box<dyn SideEffectRebuilder<Self>>) -> Self::Api<'_>;
 }
 
 // Using a trait object here to prevent a sea of complicated generics everywhere
@@ -507,7 +504,7 @@ struct CapsuleSideEffectHandleImpl<'a> {
     side_effect_data: &'a mut OnceCell<Box<dyn Any + Send>>,
 }
 impl<'a> SideEffectHandle<'a> for CapsuleSideEffectHandleImpl<'a> {
-    fn register<Effect: SideEffect<'a>>(self, effect: Effect) -> Effect::Api {
+    fn register<Effect: SideEffect>(self, effect: Effect) -> Effect::Api<'a> {
         self.side_effect_data.get_or_init(|| Box::new(effect));
 
         let effect = self
@@ -607,11 +604,11 @@ mod tests {
             type T = (u8, impl Fn(u8) + Send + Sync + Clone + 'static);
 
             fn build<'a>(
-                reader: &mut impl crate::CapsuleReader<Self::T>,
-                handle: impl crate::SideEffectHandle<'a>,
+                reader: &mut impl CapsuleReader<Self::T>,
+                handle: impl SideEffectHandle<'a>,
             ) -> Self::T {
                 let ((state, set_state), _) = handle.register((
-                    side_effects::StateEffect(123),
+                    side_effects::StateEffect::new(123),
                     side_effects::LazyStateEffect::new(|| 321),
                 ));
                 reader.read_self();
@@ -666,7 +663,7 @@ mod tests {
                 _: &mut impl CapsuleReader<Self::T>,
                 handle: impl SideEffectHandle<'a>,
             ) -> Self::T {
-                let (state, set_state) = handle.register(side_effects::StateEffect(0));
+                let (state, set_state) = handle.register(side_effects::StateEffect::new(0));
                 (*state, set_state)
             }
         }
@@ -691,7 +688,6 @@ mod tests {
     //  H -> E -> F -> G
     //
     // C, D, E, G, H are super pure. A, B, F are not.
-    #[cfg(feature = "capsule-macro")]
     #[test]
     fn complex_dependency_graph() {
         use crate::{self as rearch, capsule, side_effects, Container, SideEffectHandle};
@@ -700,7 +696,7 @@ mod tests {
         fn stateful_a<'a>(
             handle: impl SideEffectHandle<'a>,
         ) -> (u8, std::sync::Arc<dyn Fn(u8) + Send + Sync>) {
-            let (state, set_state) = handle.register(side_effects::StateEffect(0));
+            let (state, set_state) = handle.register(side_effects::StateEffect::new(0));
             (*state, std::sync::Arc::new(set_state))
         }
 

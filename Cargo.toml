@@ -1,5 +1,5 @@
 [workspace]
-members = ["rearch-capsule-macro", "rearch"]
+members = ["rearch-macros", "rearch"]
 
 [workspace.package]
 version = "0.0.0"
@@ -13,5 +13,5 @@ authors = ["Gregory Conrad <contact@gsconrad.com>"]
 readme = "README.md"
 
 [workspace.dependencies]
-rearch-capsule-macro = { path = "rearch-capsule-macro", version = "0.*" }
+rearch-macros = { path = "rearch-macros", version = "0.*" }
 rearch = { path = "rearch", version = "0.*" }

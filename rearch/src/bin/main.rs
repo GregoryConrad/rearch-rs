@@ -37,7 +37,7 @@ fn uses_factory(BigStringFactory(factory): BigStringFactory) -> String {
 fn stateful<'a>(
     handle: impl SideEffectHandle<'a>,
 ) -> (u8, std::sync::Arc<dyn Fn(u8) + Sync + Send>) {
-    let (state, set_state) = handle.register(StateEffect(0));
+    let (state, set_state) = handle.register(StateEffect::new(0));
     (*state, std::sync::Arc::new(set_state))
 }
 
