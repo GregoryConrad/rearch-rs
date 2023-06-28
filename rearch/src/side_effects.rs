@@ -48,21 +48,23 @@ impl SideEffectHandle {
     }
 }
 impl SideEffect for SideEffectHandle {
-    type Api<'a> = SideEffectRegistrant<'a>;
+    type Api<'a> = SideEffectRegistrar<'a>;
 
     fn api(&mut self, rebuild: Rebuilder<Self>) -> Self::Api<'_> {
-        SideEffectRegistrant::new(&mut self.0, rebuild)
+        SideEffectRegistrar::new(&mut self.0, rebuild)
     }
 }
 
 /// Registers the given side effect and returns its build api.
 /// You can only call register once on purpose (it consumes self);
 /// to register multiple side effects, pass them in together as a tuple.
-pub struct SideEffectRegistrant<'a> {
+pub struct SideEffectRegistrar<'a> {
     side_effect: &'a mut OnceCell<Box<dyn Any + Send>>,
     rebuild: Rebuilder<SideEffectHandle>,
 }
-impl<'a> SideEffectRegistrant<'a> {
+impl<'a> SideEffectRegistrar<'a> {
+    /// Creates a new `SideEffectRegistrar`.
+    /// This function is public to enable easy mocking in tests.
     pub fn new(
         side_effect: &'a mut OnceCell<Box<dyn Any + Send>>,
         rebuild: Rebuilder<SideEffectHandle>,
@@ -77,12 +79,12 @@ impl<'a> SideEffectRegistrant<'a> {
 macro_rules! generate_side_effect_registrant_fn_impl {
     ($($types:ident),+) => {
         #[allow(unused_parens, non_snake_case)]
-        impl<'a, $($types: SideEffect),*> FnOnce<($($types,)*)> for SideEffectRegistrant<'a> {
+        impl<'a, $($types: SideEffect),*> FnOnce<($($types,)*)> for SideEffectRegistrar<'a> {
             type Output = ($($types::Api<'a>),*);
 
             extern "rust-call" fn call_once(self, args: ($($types,)*)) -> Self::Output {
                 let failed_cast_msg =
-                    "The SideEffect registered with SideEffectRegistrant cannot be changed!";
+                    "The SideEffect registered with SideEffectRegistrar cannot be changed!";
 
                 let ($($types,)*) = args;
                 self.side_effect.get_or_init(|| Box::new(($($types),*)));
@@ -336,26 +338,6 @@ where
         (state, Arc::new(persist))
     }
 }
-// TODO manually defining the SideEffect trait impl is a PITA,
-// so we should provide a proc macro that generates a `impl SideEffect` from the following:
-//
-// #[side_effect(SyncPersistEffect<Read, Write, R, T>, (effect.data))]
-// fn sync_persist_effect_api<'a, Read, Write, R, T>(
-//     ((state, set_state), write): SyncPersistEffectInnerApi<'a>,
-// ) -> (&'a R, impl Fn(T) + Send + Sync + Clone + 'static)
-// where
-//     T: Send + 'static,
-//     R: Send + 'static,
-//     Read: FnOnce() -> R + Send + 'static,
-//     Write: Fn(T) -> R + Send + Sync + 'static,
-// {
-//     let write = write.clone();
-//     let persist = move |new_data| {
-//         let persist_result = write(new_data);
-//         set_state(persist_result);
-//     };
-//     (state, persist)
-// }
 
 /*
 #[cfg(feature = "tokio-side-effects")]

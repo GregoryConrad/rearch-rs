@@ -18,7 +18,7 @@ pub fn capsule(_attr: TokenStream, item: TokenStream) -> TokenStream {
         _ => panic!(concat!(
             "Capsule functions can only consume ",
             "a capsule reader ( reader: &mut impl CapsuleReader ) and ",
-            "a side effect registrant ( register: SideEffectRegistrant<'_> )"
+            "a side effect registrant ( register: SideEffectRegistrar<'_> )"
         )),
     });
 

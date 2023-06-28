@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use rearch::{
     capsule,
-    side_effects::{SideEffectRegistrant, StateEffect},
+    side_effects::{SideEffectRegistrar, StateEffect},
     CapsuleReader, Container,
 };
 
@@ -41,7 +41,7 @@ fn uses_factory(reader: &mut impl CapsuleReader) -> String {
 }
 
 #[capsule]
-fn stateful(register: SideEffectRegistrant<'_>) -> (u8, std::sync::Arc<dyn Fn(u8) + Send + Sync>) {
+fn stateful(register: SideEffectRegistrar<'_>) -> (u8, std::sync::Arc<dyn Fn(u8) + Send + Sync>) {
     let (state, set_state) = register(StateEffect::new(0));
     (*state, set_state)
 }

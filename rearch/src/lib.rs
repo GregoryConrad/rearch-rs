@@ -12,7 +12,12 @@
     clippy::unwrap_used
 )]
 #![feature(trait_upcasting)]
+// TODO attempt to rewrite with paste::paste! to avoid needing this nightly feature
+// (maybe just comment the nightly version out until this has stabilized)
 #![feature(macro_metavar_expr)]
+// TODO make these two opt-in via a temporary "better-api" feature that:
+// - Requires nightly
+// - Deprecates the (temporary) boring functions that are exposed for non-nightly use
 #![feature(unboxed_closures)]
 #![feature(fn_traits)]
 
@@ -71,8 +76,14 @@ impl<T: Clone + Send + Sync + 'static> CapsuleType for T {}
 dyn_clone::clone_trait_object!(CapsuleType);
 
 /// Allows you to read the current data of capsules based on the given state of the container.
-// TODO can we make this a FnOnce and FnMut impl?
-// Might need to make a dummy struct like SideEffectRegistrant to support FnOnce/FnMut
+// TODO Wrap around this with a FnOnce and FnMut impl somehow
+// CapsuleReader can't be made into trait obj, what else can we do?
+// Could force generics down user's throats, like:
+// `fn my_capsule<T: CapsuleReader>(get: Getter<'_, T>) {}`
+// but I am not a fan.
+// I think CapsuleReader could instead be a struct that has a private ContainerWriteTxn;
+// we can make that testable eventually by providing a mock CapsuleReader utility
+// Like MockCapsuleReaderBuilder::new().set(capsule, value).set(...).build()
 pub trait CapsuleReader {
     type Data;
 
@@ -102,6 +113,27 @@ pub trait SideEffect: Send + 'static {
     type Api<'a>
     where
         Self: 'a;
+
+    // TODO inner type and function to make rebuild easier? Either that (which I prefer)
+    // or we should provide a proc macro that generates a `impl SideEffect` from the following:
+    //
+    // #[side_effect(SyncPersistEffect<Read, Write, R, T>, (effect.data))]
+    // fn sync_persist_effect_api<'a, Read, Write, R, T>(
+    //     ((state, set_state), write): SyncPersistEffectInnerApi<'a>,
+    // ) -> (&'a R, impl Fn(T) + Send + Sync + Clone + 'static)
+    // where
+    //     T: Send + 'static,
+    //     R: Send + 'static,
+    //     Read: FnOnce() -> R + Send + 'static,
+    //     Write: Fn(T) -> R + Send + Sync + 'static,
+    // {
+    //     let write = write.clone();
+    //     let persist = move |new_data| {
+    //         let persist_result = write(new_data);
+    //         set_state(persist_result);
+    //     };
+    //     (state, persist)
+    // }
 
     /// Construct this side effect's build api, given:
     /// - A mutable reference to the current state of this side effect (&mut self)
@@ -327,10 +359,65 @@ impl ContainerWriteTxn<'_> {
         self.try_read::<C>()
             .expect("Data should be present due to checking/building capsule above")
     }
-
-    // TODO try_garbage_collect_subgraph() method for a particular node & its subgraph?
 }
+impl ContainerWriteTxn<'_> {
+    // TODO maybe we can expose a level-based Api to do this in just one method or two methods
+    /*
+    /// Attempts to garbage collect the given Capsule and its dependent subgraph, disposing
+    /// the supplied Capsule and its dependent subgraph (and then returning `true`) only when
+    /// the supplied Capsule and its dependent subgraph consist only of super pure capsules.
+    // TODO what about when node isnt in container? probs should return custom enum
+    pub fn try_garbage_collect_super_pure<C: Capsule + 'static>(&mut self) -> bool {
+        let id = TypeId::of::<C>();
+        let build_order = self.create_build_order_stack(id);
 
+        let is_all_super_pure = build_order
+            .iter()
+            .all(|id| self.node_or_panic(*id).is_super_pure());
+
+        if is_all_super_pure {
+            for id in build_order {
+                self.dispose_single_node(id);
+            }
+        }
+
+        is_all_super_pure
+    }
+    */
+
+    /*
+    /// Attempts to garbage collect the given Capsule and its dependent subgraph, disposing
+    /// the supplied Capsule and its dependent subgraph (and then returning `true`) only when:
+    /// - The dependent subgraph consists only of super pure capsules, or
+    /// - `dispose_impure_dependents` is set to true
+    ///
+    /// If you are not expecting the supplied Capsule to have dependents,
+    /// _set `dispose_impure_dependents` to false_, as setting it to true is *highly* unsafe.
+    /// In addition, in this case, it is also recommended to `assert!` the return value of this
+    /// function is true to ensure you didn't accidentally create other Capsule(s) which depend
+    /// on the supplied Capsule.
+    ///
+    /// # Safety
+    /// This is inherently unsafe because it violates the contract that capsules which
+    /// are not super pure will not be disposed, at least prior to their Container's disposal.
+    /// While invoking this method will never result in undefined behavior,
+    /// it can *easily* result in logic bugs, thus the unsafe marking.
+    /// This method is only exposed for the *very* few and specific use cases in which there
+    /// is a need to deeply integrate with rearch in order to prevent leaks,
+    /// such as when developing a UI framework and you need to listen to capsule updates.
+    // TODO consider splitting this into different methods, _single, _sp_deps, _ip_deps
+    pub unsafe fn force_garbage_collect<C: Capsule + 'static>(
+        dispose_impure_dependents: bool,
+    ) -> bool {
+        // handles these cases:
+        // - super pure, with impure dependents
+        // - impure, no dependents
+        // - impure, with super pure dependents
+        // - impure, with impure dependents
+        todo!()
+    }
+    */
+}
 impl ContainerWriteTxn<'_> {
     /// Triggers a first build or rebuild for the supplied capsule
     fn build_capsule<C: Capsule + 'static>(&mut self) {
@@ -366,7 +453,7 @@ impl ContainerWriteTxn<'_> {
             .expect("Requested node should be in the graph")
     }
 
-    /// Builds only the requested node. Panics if node is not in the graph
+    /// Builds only the requested node. Panics if the node is not in the graph
     fn build_single_node(&mut self, id: TypeId) {
         // Remove old dependency info since it may change on this build
         // We use std::mem::take below to prevent needing a clone on the existing dependencies
@@ -378,6 +465,20 @@ impl ContainerWriteTxn<'_> {
 
         // Trigger the build (which also populates its new dependencies in self)
         (self.node_or_panic(id).build)(self);
+    }
+
+    /// Forcefully disposes only the requested node, cleaning up the dependency graph as needed.
+    /// Panics if the node is not in the graph.
+    fn dispose_single_node(&mut self, id: TypeId) {
+        self.data.remove(&id);
+        self.nodes
+            .remove(&id)
+            .expect("Node should be in graph")
+            .dependencies
+            .iter()
+            .for_each(|dep| {
+                self.node_or_panic(*dep).dependents.remove(&id);
+            });
     }
 
     /// Creates the start node's dependent subgraph build order, including start, *as a stack*
@@ -425,15 +526,7 @@ impl ContainerWriteTxn<'_> {
         build_order.rev().for_each(|id| {
             let is_disposable = self.node_or_panic(id).is_disposable();
             if is_disposable {
-                self.data.remove(&id);
-                self.nodes
-                    .remove(&id)
-                    .expect("Node should be in graph")
-                    .dependencies
-                    .iter()
-                    .for_each(|dep| {
-                        self.node_or_panic(*dep).dependents.remove(&id);
-                    });
+                self.dispose_single_node(id);
             } else {
                 non_disposable.push(id);
             }
@@ -501,9 +594,12 @@ impl CapsuleManager {
         txn.data.insert(id, Box::new(new_data));
     }
 
+    fn is_super_pure(&self) -> bool {
+        self.side_effect.is::<()>()
+    }
+
     fn is_disposable(&self) -> bool {
-        let is_super_pure = self.side_effect.is::<()>();
-        is_super_pure && self.dependents.is_empty()
+        self.is_super_pure() && self.dependents.is_empty()
     }
 }
 
@@ -667,7 +763,7 @@ mod tests {
 
         #[capsule]
         fn stateful_a(
-            register: side_effects::SideEffectRegistrant<'_>,
+            register: side_effects::SideEffectRegistrar<'_>,
         ) -> (u8, std::sync::Arc<dyn Fn(u8) + Send + Sync>) {
             let (state, set_state) = register(side_effects::StateEffect::new(0));
             (*state, set_state)
@@ -679,7 +775,7 @@ mod tests {
         }
 
         #[capsule]
-        fn b(reader: &mut impl CapsuleReader, _: side_effects::SideEffectRegistrant<'_>) -> u8 {
+        fn b(reader: &mut impl CapsuleReader, _: side_effects::SideEffectRegistrar<'_>) -> u8 {
             reader.read::<ACapsule>() + 1
         }
 
@@ -699,7 +795,7 @@ mod tests {
         }
 
         #[capsule]
-        fn f(reader: &mut impl CapsuleReader, _: side_effects::SideEffectRegistrant<'_>) -> u8 {
+        fn f(reader: &mut impl CapsuleReader, _: side_effects::SideEffectRegistrar<'_>) -> u8 {
             reader.read::<ECapsule>()
         }
 
