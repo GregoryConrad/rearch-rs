@@ -1,8 +1,12 @@
-use std::{cell::OnceCell, marker::PhantomData, sync::Arc};
+use std::{any::Any, cell::OnceCell, marker::PhantomData, sync::Arc};
 
 use crate::{SideEffect, SideEffectRebuilder};
 
 type Rebuilder<T> = Box<dyn SideEffectRebuilder<T>>;
+
+// Note: We use Arc<Fn()>/Box<dyn Fn()> extensively throughout the SideEffect::Apis in order to:
+// - Improve our users' testability (it is difficult to mock static dispatch in SideEffect::Apis)
+// - Avoid yet another nightly requirement (`type Foo = impl Bar;` currently requires nightly)
 
 macro_rules! generate_tuple_side_effect_impl {
     ($($types:ident),*) => {
@@ -25,7 +29,7 @@ macro_rules! generate_tuple_side_effect_impl {
     };
 }
 
-generate_tuple_side_effect_impl!();
+generate_tuple_side_effect_impl!(); // () is the no-op side effect that denotes super pure capsules
 generate_tuple_side_effect_impl!(A, B);
 generate_tuple_side_effect_impl!(A, B, C);
 generate_tuple_side_effect_impl!(A, B, C, D);
@@ -34,7 +38,86 @@ generate_tuple_side_effect_impl!(A, B, C, D, E, F);
 generate_tuple_side_effect_impl!(A, B, C, D, E, F, G);
 generate_tuple_side_effect_impl!(A, B, C, D, E, F, G, H);
 
-// TODO consider making effects with api callbacks return Box<dyn Fn> so that they support tests
+/// Provides a mechanism to register an arbitrary side effect in the build method.
+#[derive(Default)]
+pub struct SideEffectHandle(OnceCell<Box<dyn Any + Send>>);
+impl SideEffectHandle {
+    #[must_use]
+    pub const fn new() -> Self {
+        Self(OnceCell::new())
+    }
+}
+impl SideEffect for SideEffectHandle {
+    type Api<'a> = SideEffectRegistrant<'a>;
+
+    fn api(&mut self, rebuild: Rebuilder<Self>) -> Self::Api<'_> {
+        SideEffectRegistrant::new(&mut self.0, rebuild)
+    }
+}
+
+/// Registers the given side effect and returns its build api.
+/// You can only call register once on purpose (it consumes self);
+/// to register multiple side effects, pass them in together as a tuple.
+pub struct SideEffectRegistrant<'a> {
+    side_effect: &'a mut OnceCell<Box<dyn Any + Send>>,
+    rebuild: Rebuilder<SideEffectHandle>,
+}
+impl<'a> SideEffectRegistrant<'a> {
+    pub fn new(
+        side_effect: &'a mut OnceCell<Box<dyn Any + Send>>,
+        rebuild: Rebuilder<SideEffectHandle>,
+    ) -> Self {
+        Self {
+            side_effect,
+            rebuild,
+        }
+    }
+}
+
+macro_rules! generate_side_effect_registrant_fn_impl {
+    ($($types:ident),+) => {
+        #[allow(unused_parens, non_snake_case)]
+        impl<'a, $($types: SideEffect),*> FnOnce<($($types,)*)> for SideEffectRegistrant<'a> {
+            type Output = ($($types::Api<'a>),*);
+
+            extern "rust-call" fn call_once(self, args: ($($types,)*)) -> Self::Output {
+                let failed_cast_msg =
+                    "The SideEffect registered with SideEffectRegistrant cannot be changed!";
+
+                let ($($types,)*) = args;
+                self.side_effect.get_or_init(|| Box::new(($($types),*)));
+                let effect = self
+                    .side_effect
+                    .get_mut()
+                    .expect("Side effect should've been initialized above")
+                    .downcast_mut::<($($types),*)>()
+                    .expect(failed_cast_msg);
+
+                effect.api(Box::new(move |mutation| {
+                    (self.rebuild)(Box::new(|handle| {
+                        let effect = handle
+                            .0
+                            .get_mut()
+                            .expect("Side effect should've been initialized in previous build")
+                            .downcast_mut::<($($types),*)>()
+                            .expect(failed_cast_msg);
+                        mutation(effect);
+                    }));
+                }))
+            }
+        }
+    }
+}
+
+generate_side_effect_registrant_fn_impl!(A);
+generate_side_effect_registrant_fn_impl!(A, B);
+generate_side_effect_registrant_fn_impl!(A, B, C);
+generate_side_effect_registrant_fn_impl!(A, B, C, D);
+generate_side_effect_registrant_fn_impl!(A, B, C, D, E);
+generate_side_effect_registrant_fn_impl!(A, B, C, D, E, F);
+generate_side_effect_registrant_fn_impl!(A, B, C, D, E, F, G);
+generate_side_effect_registrant_fn_impl!(A, B, C, D, E, F, G, H);
+
 pub struct StateEffect<T>(T);
 impl<T> StateEffect<T> {
     pub const fn new(default: T) -> Self {
@@ -42,12 +125,15 @@ impl<T> StateEffect<T> {
     }
 }
 impl<T: Send + 'static> SideEffect for StateEffect<T> {
-    type Api<'a> = (&'a mut T, impl Fn(T) + Send + Sync + Clone + 'static);
+    type Api<'a> = (&'a mut T, Arc<dyn Fn(T) + Send + Sync>);
 
     fn api(&mut self, rebuild: Rebuilder<Self>) -> Self::Api<'_> {
-        (&mut self.0, move |new_state| {
-            rebuild(Box::new(|effect| effect.0 = new_state));
-        })
+        (
+            &mut self.0,
+            Arc::new(move |new_state| {
+                rebuild(Box::new(|effect| effect.0 = new_state));
+            }),
+        )
     }
 }
 
@@ -59,8 +145,12 @@ impl<T, F: FnOnce() -> T> LazyStateEffect<T, F> {
         Self(OnceCell::new(), Some(default))
     }
 }
-impl<T: Send + 'static, F: FnOnce() -> T + Send + 'static> SideEffect for LazyStateEffect<T, F> {
-    type Api<'a> = (&'a mut T, impl Fn(T) + Send + Sync + Clone + 'static);
+impl<T, F> SideEffect for LazyStateEffect<T, F>
+where
+    T: Send + 'static,
+    F: FnOnce() -> T + Send + 'static,
+{
+    type Api<'a> = (&'a mut T, Arc<dyn Fn(T) + Send + Sync>);
 
     fn api(&mut self, rebuild: Rebuilder<Self>) -> Self::Api<'_> {
         self.0.get_or_init(|| {
@@ -68,12 +158,12 @@ impl<T: Send + 'static, F: FnOnce() -> T + Send + 'static> SideEffect for LazySt
         });
         (
             self.0.get_mut().expect("'State initialized above"),
-            move |new_state| {
+            Arc::new(move |new_state| {
                 rebuild(Box::new(|effect| {
                     effect.0.take();
                     _ = effect.0.set(new_state);
                 }));
-            },
+            }),
         )
     }
 }
@@ -84,7 +174,10 @@ impl<T> ValueEffect<T> {
         Self(value)
     }
 }
-impl<T: Send + 'static> SideEffect for ValueEffect<T> {
+impl<T> SideEffect for ValueEffect<T>
+where
+    T: Send + 'static,
+{
     type Api<'a> = &'a mut T;
 
     fn api(&mut self, _: Rebuilder<Self>) -> Self::Api<'_> {
@@ -100,7 +193,11 @@ impl<T, F: FnOnce() -> T> LazyValueEffect<T, F> {
         Self(OnceCell::new(), Some(init))
     }
 }
-impl<T: Send + 'static, F: FnOnce() -> T + Send + 'static> SideEffect for LazyValueEffect<T, F> {
+impl<T, F> SideEffect for LazyValueEffect<T, F>
+where
+    T: Send + 'static,
+    F: FnOnce() -> T + Send + 'static,
+{
     type Api<'a> = &'a mut T;
 
     fn api(&mut self, _: Rebuilder<Self>) -> Self::Api<'_> {
@@ -124,10 +221,10 @@ impl RebuilderEffect {
     }
 }
 impl SideEffect for RebuilderEffect {
-    type Api<'a> = impl Fn() + Clone + Send + Sync;
+    type Api<'a> = Arc<dyn Fn() + Send + Sync>;
 
     fn api(&mut self, rebuild: Rebuilder<Self>) -> Self::Api<'_> {
-        move || rebuild(Box::new(|_| ()))
+        Arc::new(move || rebuild(Box::new(|_| {})))
     }
 }
 
@@ -154,18 +251,21 @@ impl<F: FnOnce()> Drop for RunOnChangeEffect<F> {
         }
     }
 }
-impl<F: FnOnce() + Send + 'static> SideEffect for RunOnChangeEffect<F> {
-    type Api<'a> = impl Fn(F) + 'a;
+impl<F> SideEffect for RunOnChangeEffect<F>
+where
+    F: FnOnce() + Send + 'static,
+{
+    type Api<'a> = Box<dyn Fn(F) + 'a>;
 
     fn api(&mut self, _: Rebuilder<Self>) -> Self::Api<'_> {
         let cell = std::cell::RefCell::new(self); // so Api doesn't need to be FnMut
-        move |new_effect| {
+        Box::new(move |new_effect| {
             let mut effect = cell.borrow_mut();
             if let Some(callback) = std::mem::take(&mut effect.0) {
                 callback();
             }
             effect.0 = Some(new_effect);
-        }
+        })
     }
 }
 
@@ -220,7 +320,7 @@ where
     Read: FnOnce() -> R + Send + 'static,
     Write: Fn(T) -> R + Send + Sync + 'static,
 {
-    type Api<'a> = (&'a R, impl Fn(T) + Send + Sync + Clone + 'static);
+    type Api<'a> = (&'a R, Arc<dyn Fn(T) + Send + Sync>);
 
     fn api(&mut self, rebuild: Rebuilder<Self>) -> Self::Api<'_> {
         let ((state, set_state), write) = self.data.api(Box::new(move |mutation| {
@@ -233,11 +333,11 @@ where
             set_state(persist_result);
         };
 
-        (state, persist)
+        (state, Arc::new(persist))
     }
 }
 // TODO manually defining the SideEffect trait impl is a PITA,
-// so we should provide a proc macro that generates a impl SideEffect<'a> from the following:
+// so we should provide a proc macro that generates a `impl SideEffect` from the following:
 //
 // #[side_effect(SyncPersistEffect<Read, Write, R, T>, (effect.data))]
 // fn sync_persist_effect_api<'a, Read, Write, R, T>(

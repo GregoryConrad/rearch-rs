@@ -12,98 +12,78 @@
     clippy::unwrap_used
 )]
 #![feature(trait_upcasting)]
-#![feature(impl_trait_in_assoc_type)]
 #![feature(macro_metavar_expr)]
+#![feature(unboxed_closures)]
+#![feature(fn_traits)]
+
 use concread::hashmap::{HashMapReadTxn, HashMapWriteTxn};
 use dyn_clone::DynClone;
 use std::{
     any::{Any, TypeId},
-    cell::OnceCell,
     collections::HashSet,
     marker::PhantomData,
     sync::{Arc, Mutex, Weak},
 };
 
-pub use rearch_macros::{capsule, factory};
+pub use rearch_macros::capsule;
 
 pub mod side_effects;
-
-/// Performs a *consistent* read on all supplied capsules.
-///
-/// Consistency is important here: if you need the current data from a few different capsules,
-/// *do not* read them individually, but rather group them together with one read!() call.
-/// If you read capsules one at a time, there will be increased overhead in addition to possible
-/// inconsistency (say if you read one capsule and then the container is updated right after).
-///
-/// Ideally, this would just be a function with variadic generics but Rust doesn't have them.
-///
-/// # Concurrency
-/// Blocks when any of the requested capsules' data is not present in the container.
-///
-/// Internally, tries to read all supplied capsules with a read transaction first (cheap),
-/// but if that fails (i.e., capsules' data not present in the container),
-/// read!() spins up a write txn and initializes all needed capsules (which blocks).
-#[macro_export]
-macro_rules! read {
-    ($container:expr, $($C:ident),+) => {
-        {
-            paste::paste! {
-                let container = &$container;
-                #[allow(non_snake_case, unused_parens)]
-                if let ($(Some([<i $C>])),+) =
-                    container.with_read_txn(|txn| ($(txn.try_read::<$C>()),+)) {
-                    ($([<i $C>]),+)
-                } else {
-                    container.with_write_txn(|txn| ($(txn.read_or_init::<$C>()),+))
-                }
-            }
-        }
-    };
-}
 
 /// Capsules are blueprints for creating some immutable data
 /// and do not actually contain any data themselves.
 /// See the README for more.
 pub trait Capsule {
-    /// The type of data associated with this capsule. Capsule types must be
-    /// `Clone + Send + Sync + 'static`.
+    /// The type of data associated with this capsule.
+    /// Capsule types must be `Clone + Send + Sync + 'static`.
     /// It is recommended to only put types with "cheap" clones in Capsules;
     /// think Copy types, small Vecs and other containers, basic data structures, and Arcs.
     /// If you are dealing with a bigger chunk of data, consider wrapping it in an Arc.
-    // We use an associated type so that Capsule can only be implemented once
-    // for each concrete type
-    type T: CapsuleType;
+    /// Note: The `im` crate plays *very nicely* with rearch.
+    // Associated type so that Capsule can only be implemented once for each concrete type
+    type Data: CapsuleType;
+
+    /// The `SideEffect` associated with this Capsule.
+    /// Every capsule has a side effect type, even super pure capsules.
+    /// (Super pure capsules should use `()` as their `Effect`.)
+    /// To use multiple side effects, set `Effect` as a tuple combining the different side effects.
+    type Effect: SideEffect;
+
+    /// Initialize this Capsule's `Effect`, which will later be used to provide `build`
+    /// with this Capsule's `SideEffect::Api`.
+    /// To initialize multiple side effects, return them as a tuple.
+    fn init_side_effect() -> Self::Effect;
 
     /// Builds the capsule's immutable data using a given snapshot of the data flow graph.
     /// (The snapshot, a `ContainerWriteTxn`, is abstracted away for you.)
     ///
     /// ABSOLUTELY DO NOT TRIGGER ANY REBUILDS WITHIN THIS FUNCTION!
     /// Doing so will result in a deadlock.
-    fn build<'a>(
-        reader: &mut impl CapsuleReader<Self::T>,
-        handle: impl SideEffectHandle<'a>,
-    ) -> Self::T;
+    // TODO make this take &self to hopefully provide first class fn support in future?
+    fn build(
+        reader: &mut impl CapsuleReader<Data = Self::Data>,
+        effect: <Self::Effect as SideEffect>::Api<'_>,
+    ) -> Self::Data;
 }
 
+/// Represents a valid type of any capsule. Capsules must be `Clone + Send + Sync + 'static`.
+pub trait CapsuleType: Any + DynClone + Send + Sync + 'static {}
+impl<T: Clone + Send + Sync + 'static> CapsuleType for T {}
+dyn_clone::clone_trait_object!(CapsuleType);
+
 /// Allows you to read the current data of capsules based on the given state of the container.
-pub trait CapsuleReader<T> {
+// TODO can we make this a FnOnce and FnMut impl?
+// Might need to make a dummy struct like SideEffectRegistrant to support FnOnce/FnMut
+pub trait CapsuleReader {
+    type Data;
+
     /// Reads the current data of the supplied capsule, initializing it if needed.
     /// Internally forms a dependency graph amongst capsules, so feel free to conditionally invoke
     /// this function in case you only conditionally need a capsule's value.
-    fn read<O: Capsule + 'static>(&mut self) -> O::T;
+    fn read<O: Capsule + 'static>(&mut self) -> O::Data;
 
     /// Reads the current value of this capsule, if there is one
     /// (there won't be on a first build or directly after being garbage collected).
-    fn read_self(&self) -> Option<T>;
-}
-
-/// Provides a mechanism to register side effects in the build method.
-// Ideally, this would just be a generic closure, but those don't exist in Rust.
-pub trait SideEffectHandle<'a> {
-    /// Registers the given side effect and returns its build api.
-    /// You can only call register once on purpose (it consumes self);
-    /// to register multiple side effects, pass them in together as a tuple.
-    fn register<Effect: SideEffect>(self, effect: Effect) -> Effect::Api<'a>;
+    fn read_self(&self) -> Option<Self::Data>;
 }
 
 /// Represents a side effect that can be utilized within the build method.
@@ -131,6 +111,7 @@ pub trait SideEffect: Send + 'static {
 
 // Using a trait object here to prevent a sea of complicated generics everywhere
 // TODO maybe try making this static dispatch again? Box<dyn ...> everywhere has been tedious.
+// Keep inner as Box<dyn FnOnce(&mut S)>, but outer should be impl
 pub trait SideEffectRebuilder<S>:
     Fn(Box<dyn FnOnce(&mut S)>) + Send + Sync + DynClone + 'static
 {
@@ -183,12 +164,58 @@ impl Container {
         let rebuilder = CapsuleRebuilder(Arc::downgrade(&self.0));
         self.0.with_write_txn(rebuilder, to_run)
     }
+
+    /// Performs a *consistent* read on all supplied capsules.
+    ///
+    /// Consistency is important here: if you need the current data from a few different capsules,
+    /// *do not* read them individually, but rather group them together with one `read()` call.
+    /// If you read capsules one at a time, there will be increased overhead in addition to possible
+    /// inconsistency (say if you read one capsule and then the container is updated right after).
+    ///
+    /// # Concurrency
+    /// Blocks when any of the requested capsules' data is not present in the container.
+    ///
+    /// Internally, tries to read all supplied capsules with a read txn first (cheap),
+    /// but if that fails (i.e., capsules' data not present in the container),
+    /// spins up a write txn and initializes all needed capsules (which blocks).
+    // TODO add our fun lil var args impl hack to Container to make it easier to read capsules
+    pub fn read<CL: CapsuleList>(&self, capsules: CL) -> CL::Data {
+        capsules.read(self)
+    }
 }
 
-/// Represents a valid type of any capsule. Capsules must be `Clone + Send + Sync + 'static`.
-pub trait CapsuleType: Any + DynClone + Send + Sync + 'static {}
-impl<T: Clone + Send + Sync + 'static> CapsuleType for T {}
-dyn_clone::clone_trait_object!(CapsuleType);
+pub trait CapsuleList {
+    type Data;
+    fn read(self, container: &Container) -> Self::Data;
+}
+
+macro_rules! generate_capsule_list_impl {
+    ($($C:ident),+) => {
+        paste::paste! {
+            #[allow(non_snake_case, unused_parens)]
+            impl<$($C: Capsule + 'static),*> CapsuleList for ($($C),*) {
+                type Data = ($($C::Data),*);
+                fn read(self, container: &Container) -> Self::Data {
+                    if let ($(Some([<i $C>])),*) =
+                        container.with_read_txn(|txn| ($(txn.try_read::<$C>()),*)) {
+                        ($([<i $C>]),*)
+                    } else {
+                        container.with_write_txn(|txn| ($(txn.read_or_init::<$C>()),*))
+                    }
+                }
+            }
+        }
+    };
+}
+
+generate_capsule_list_impl!(A);
+generate_capsule_list_impl!(A, B);
+generate_capsule_list_impl!(A, B, C);
+generate_capsule_list_impl!(A, B, C, D);
+generate_capsule_list_impl!(A, B, C, D, E);
+generate_capsule_list_impl!(A, B, C, D, E, F);
+generate_capsule_list_impl!(A, B, C, D, E, F, G);
+generate_capsule_list_impl!(A, B, C, D, E, F, G, H);
 
 /// The internal backing store for a `Container`.
 /// All capsule data is stored within `data`, and all data flow graph nodes are stored in `nodes`.
@@ -261,12 +288,12 @@ pub struct ContainerReadTxn<'a> {
 }
 impl ContainerReadTxn<'_> {
     #[must_use]
-    pub fn try_read<C: Capsule + 'static>(&self) -> Option<C::T> {
+    pub fn try_read<C: Capsule + 'static>(&self) -> Option<C::Data> {
         let id = TypeId::of::<C>();
         self.data.get(&id).map(|data| {
             let data: Box<dyn Any> = data.clone();
             *data
-                .downcast::<C::T>()
+                .downcast::<C::Data>()
                 .expect("Types should be properly enforced due to generics")
         })
     }
@@ -279,17 +306,17 @@ pub struct ContainerWriteTxn<'a> {
 }
 impl ContainerWriteTxn<'_> {
     #[must_use]
-    pub fn try_read<C: Capsule + 'static>(&self) -> Option<C::T> {
+    pub fn try_read<C: Capsule + 'static>(&self) -> Option<C::Data> {
         let id = TypeId::of::<C>();
         self.data.get(&id).map(|data| {
             let data: Box<dyn Any> = data.clone();
             *data
-                .downcast::<C::T>()
+                .downcast::<C::Data>()
                 .expect("Types should be properly enforced due to generics")
         })
     }
 
-    pub fn read_or_init<C: Capsule + 'static>(&mut self) -> C::T {
+    pub fn read_or_init<C: Capsule + 'static>(&mut self) -> C::Data {
         let id = TypeId::of::<C>();
         if !self.data.contains_key(&id) {
             #[cfg(feature = "logging")]
@@ -300,6 +327,8 @@ impl ContainerWriteTxn<'_> {
         self.try_read::<C>()
             .expect("Data should be present due to checking/building capsule above")
     }
+
+    // TODO try_garbage_collect_subgraph() method for a particular node & its subgraph?
 }
 
 impl ContainerWriteTxn<'_> {
@@ -421,7 +450,7 @@ impl ContainerWriteTxn<'_> {
 struct CapsuleManager {
     dependencies: HashSet<TypeId>,
     dependents: HashSet<TypeId>,
-    side_effect_data: OnceCell<Box<dyn Any + Send>>,
+    side_effect: Box<dyn Any + Send>,
     rebuilder: CapsuleRebuilder,
     build: fn(&mut ContainerWriteTxn),
 }
@@ -430,7 +459,7 @@ impl CapsuleManager {
         Self {
             dependencies: HashSet::new(),
             dependents: HashSet::new(),
-            side_effect_data: OnceCell::new(),
+            side_effect: Box::new(C::init_side_effect()),
             rebuilder,
             build: Self::build::<C>,
         }
@@ -444,38 +473,48 @@ impl CapsuleManager {
 
         let manager = txn.node_or_panic(id);
         let rebuilder = manager.rebuilder.clone();
-        let mut side_effect_data = std::mem::take(&mut manager.side_effect_data);
+        let mut side_effect = std::mem::replace(&mut manager.side_effect, Box::new(()))
+            .downcast::<C::Effect>()
+            .expect("Types should be properly enforced due to generics");
+
+        let side_effect_api = side_effect.api(Box::new(move |mutation| {
+            rebuilder.rebuild(id, |manager| {
+                let effect = manager
+                    .side_effect
+                    .downcast_mut::<C::Effect>()
+                    .expect("Types should be properly enforced due to generics");
+                mutation(effect);
+            });
+        }));
 
         let new_data = C::build(
             &mut CapsuleReaderImpl::<C> {
                 txn,
                 ghost: PhantomData,
             },
-            CapsuleSideEffectHandleImpl {
-                id,
-                rebuilder,
-                side_effect_data: &mut side_effect_data,
-            },
+            side_effect_api,
         );
 
         let manager = txn.node_or_panic(id);
-        manager.side_effect_data = side_effect_data;
+        manager.side_effect = side_effect;
 
         txn.data.insert(id, Box::new(new_data));
     }
 
     fn is_disposable(&self) -> bool {
-        let is_super_pure = self.side_effect_data.get().is_none();
+        let is_super_pure = self.side_effect.is::<()>();
         is_super_pure && self.dependents.is_empty()
     }
 }
 
 struct CapsuleReaderImpl<'txn_scope, 'txn_total, C: Capsule + 'static> {
     txn: &'txn_scope mut ContainerWriteTxn<'txn_total>,
-    ghost: PhantomData<C::T>, // phantom with C::T to prevent needing C to be Send + Sync
+    ghost: PhantomData<C::Data>, // phantom with C::T to prevent needing C to be Send + Sync
 }
-impl<C: Capsule + 'static> CapsuleReader<C::T> for CapsuleReaderImpl<'_, '_, C> {
-    fn read<O: Capsule + 'static>(&mut self) -> O::T {
+impl<C: Capsule + 'static> CapsuleReader for CapsuleReaderImpl<'_, '_, C> {
+    type Data = C::Data;
+
+    fn read<O: Capsule + 'static>(&mut self) -> O::Data {
         let (this, other) = (TypeId::of::<C>(), TypeId::of::<O>());
         assert_ne!(
             this, other,
@@ -493,38 +532,8 @@ impl<C: Capsule + 'static> CapsuleReader<C::T> for CapsuleReaderImpl<'_, '_, C> 
         data
     }
 
-    fn read_self(&self) -> Option<C::T> {
+    fn read_self(&self) -> Option<Self::Data> {
         self.txn.try_read::<C>()
-    }
-}
-
-struct CapsuleSideEffectHandleImpl<'a> {
-    id: TypeId,
-    rebuilder: CapsuleRebuilder,
-    side_effect_data: &'a mut OnceCell<Box<dyn Any + Send>>,
-}
-impl<'a> SideEffectHandle<'a> for CapsuleSideEffectHandleImpl<'a> {
-    fn register<Effect: SideEffect>(self, effect: Effect) -> Effect::Api<'a> {
-        self.side_effect_data.get_or_init(|| Box::new(effect));
-
-        let effect = self
-            .side_effect_data
-            .get_mut()
-            .expect("Side effect data should've been initialized above")
-            .downcast_mut::<Effect>()
-            .expect("A SideEffectHandle's registered SideEffect cannot be changed!");
-
-        effect.api(Box::new(move |mutation| {
-            self.rebuilder.rebuild(self.id, |manager| {
-                let effect = manager
-                    .side_effect_data
-                    .get_mut()
-                    .expect("Side effect data should've been initialized in previous build")
-                    .downcast_mut::<Effect>()
-                    .expect("A SideEffectHandle's registered SideEffect cannot be changed!");
-                mutation(effect);
-            });
-        }))
     }
 }
 
@@ -541,84 +550,48 @@ mod tests {
     }
 
     /// Check for some fundamental functionality with the classic count example
-    mod basic_count {
+    #[test]
+    fn basic_count() {
         use crate::*;
-
-        #[test]
-        fn basic_count() {
-            let container = Container::new();
-            assert_eq!(
-                1,
-                container.with_write_txn(|txn| txn.read_or_init::<CountPlusOneCapsule>())
-            );
-            assert_eq!(
-                0,
-                container.with_read_txn(|txn| txn.try_read::<CountCapsule>().unwrap())
-            );
-        }
-
-        #[test]
-        fn read_macro() {
-            let container = Container::new();
-            let (count, count_plus_one) = read!(container, CountCapsule, CountPlusOneCapsule);
-            assert_eq!(0, count);
-            assert_eq!(1, count_plus_one);
-
-            let count = read!(container, CountCapsule);
-            assert_eq!(0, count);
-
-            let count_plus_one = read!(&Container::new(), CountPlusOneCapsule);
-            assert_eq!(1, count_plus_one);
-        }
 
         struct CountCapsule;
         impl Capsule for CountCapsule {
-            type T = u8;
-
-            fn build<'a>(
-                _: &mut impl CapsuleReader<Self::T>,
-                _: impl SideEffectHandle<'a>,
-            ) -> Self::T {
+            type Data = u8;
+            type Effect = ();
+            fn init_side_effect() -> Self::Effect {}
+            fn build(_: &mut impl CapsuleReader<Data = Self::Data>, _: ()) -> Self::Data {
                 0
             }
         }
         struct CountPlusOneCapsule;
         impl Capsule for CountPlusOneCapsule {
-            type T = u8;
-
-            fn build<'a>(
-                reader: &mut impl CapsuleReader<Self::T>,
-                _: impl SideEffectHandle<'a>,
-            ) -> Self::T {
+            type Data = u8;
+            type Effect = ();
+            fn init_side_effect() -> Self::Effect {}
+            fn build(reader: &mut impl CapsuleReader<Data = Self::Data>, _: ()) -> Self::Data {
                 reader.read::<CountCapsule>() + 1
-            }
-        }
-    }
-
-    #[test]
-    fn capsule_uses_read_and_handle() {
-        use crate::*;
-
-        struct MyCapsule;
-        impl crate::Capsule for MyCapsule {
-            type T = (u8, impl Fn(u8) + Send + Sync + Clone + 'static);
-
-            fn build<'a>(
-                reader: &mut impl CapsuleReader<Self::T>,
-                handle: impl SideEffectHandle<'a>,
-            ) -> Self::T {
-                let ((state, set_state), _) = handle.register((
-                    side_effects::StateEffect::new(123),
-                    side_effects::LazyStateEffect::new(|| 321),
-                ));
-                reader.read_self();
-                (*state, set_state)
             }
         }
 
         let container = Container::new();
-        let (state, _) = read!(container, MyCapsule);
-        assert_eq!(state, 123);
+        assert_eq!(
+            (None, None),
+            container.with_read_txn(|txn| (
+                txn.try_read::<CountCapsule>(),
+                txn.try_read::<CountPlusOneCapsule>()
+            ))
+        );
+        assert_eq!(
+            1,
+            container.with_write_txn(|txn| txn.read_or_init::<CountPlusOneCapsule>())
+        );
+        assert_eq!(
+            0,
+            container.with_read_txn(|txn| txn.try_read::<CountCapsule>().unwrap())
+        );
+
+        let container = Container::new();
+        assert_eq!((0, 1), container.read((CountCapsule, CountPlusOneCapsule)));
     }
 
     mod state_updates {
@@ -628,16 +601,16 @@ mod tests {
         fn state_gets_updates() {
             let container = Container::new();
 
-            let (state, set_state) = read!(container, StateCapsule);
+            let (state, set_state) = container.read(StateCapsule);
             assert_eq!(state, 0);
 
             set_state(1);
-            let (state, set_state) = read!(container, StateCapsule);
+            let (state, set_state) = container.read(StateCapsule);
             assert_eq!(state, 1);
 
             set_state(2);
             set_state(3);
-            let (state, _) = read!(container, StateCapsule);
+            let (state, _) = container.read(StateCapsule);
             assert_eq!(state, 3);
         }
 
@@ -645,37 +618,37 @@ mod tests {
         fn dependent_gets_updates() {
             let container = Container::new();
 
-            let ((state, set_state), plus_one) = read!(container, StateCapsule, DependentCapsule);
+            let ((state, set_state), plus_one) = container.read((StateCapsule, DependentCapsule));
             assert_eq!(0, state);
             assert_eq!(1, plus_one);
             set_state(1);
 
-            let ((state, _), plus_one) = read!(container, StateCapsule, DependentCapsule);
+            let ((state, _), plus_one) = container.read((StateCapsule, DependentCapsule));
             assert_eq!(1, state);
             assert_eq!(2, plus_one);
         }
 
         struct StateCapsule;
         impl Capsule for StateCapsule {
-            type T = (u8, impl Fn(u8) + Send + Clone + 'static);
-
-            fn build<'a>(
-                _: &mut impl CapsuleReader<Self::T>,
-                handle: impl SideEffectHandle<'a>,
-            ) -> Self::T {
-                let (state, set_state) = handle.register(side_effects::StateEffect::new(0));
+            type Data = (u8, Arc<dyn Fn(u8) + Send + Sync>);
+            type Effect = side_effects::StateEffect<u8>;
+            fn init_side_effect() -> Self::Effect {
+                side_effects::StateEffect::new(0)
+            }
+            fn build(
+                _: &mut impl CapsuleReader<Data = Self::Data>,
+                (state, set_state): <Self::Effect as SideEffect>::Api<'_>,
+            ) -> Self::Data {
                 (*state, set_state)
             }
         }
 
         struct DependentCapsule;
         impl Capsule for DependentCapsule {
-            type T = u8;
-
-            fn build<'a>(
-                reader: &mut impl CapsuleReader<Self::T>,
-                _: impl SideEffectHandle<'a>,
-            ) -> Self::T {
+            type Data = u8;
+            type Effect = ();
+            fn init_side_effect() -> Self::Effect {}
+            fn build(reader: &mut impl CapsuleReader<Data = Self::Data>, _: ()) -> Self::Data {
                 reader.read::<StateCapsule>().0 + 1
             }
         }
@@ -690,51 +663,49 @@ mod tests {
     // C, D, E, G, H are super pure. A, B, F are not.
     #[test]
     fn complex_dependency_graph() {
-        use crate::{self as rearch, capsule, side_effects, Container, SideEffectHandle};
+        use crate::{self as rearch, capsule, side_effects, CapsuleReader, Container};
 
         #[capsule]
-        fn stateful_a<'a>(
-            handle: impl SideEffectHandle<'a>,
+        fn stateful_a(
+            register: side_effects::SideEffectRegistrant<'_>,
         ) -> (u8, std::sync::Arc<dyn Fn(u8) + Send + Sync>) {
-            let (state, set_state) = handle.register(side_effects::StateEffect::new(0));
-            (*state, std::sync::Arc::new(set_state))
+            let (state, set_state) = register(side_effects::StateEffect::new(0));
+            (*state, set_state)
         }
 
         #[capsule]
-        fn a(StatefulACapsule(a): StatefulACapsule) -> u8 {
-            a.0
+        fn a(reader: &mut impl CapsuleReader) -> u8 {
+            reader.read::<StatefulACapsule>().0
         }
 
         #[capsule]
-        fn b<'a>(ACapsule(a): ACapsule, handle: impl SideEffectHandle<'a>) -> u8 {
-            handle.register(());
-            a + 1
+        fn b(reader: &mut impl CapsuleReader, _: side_effects::SideEffectRegistrant<'_>) -> u8 {
+            reader.read::<ACapsule>() + 1
         }
 
         #[capsule]
-        const fn c(BCapsule(b): BCapsule, FCapsule(f): FCapsule) -> u8 {
-            b + f
+        fn c(reader: &mut impl CapsuleReader) -> u8 {
+            reader.read::<BCapsule>() + reader.read::<FCapsule>()
         }
 
         #[capsule]
-        const fn d(CCapsule(c): CCapsule) -> u8 {
-            c
+        fn d(reader: &mut impl CapsuleReader) -> u8 {
+            reader.read::<CCapsule>()
         }
 
         #[capsule]
-        const fn e(ACapsule(a): ACapsule, HCapsule(h): HCapsule) -> u8 {
-            a + h
+        fn e(reader: &mut impl CapsuleReader) -> u8 {
+            reader.read::<ACapsule>() + reader.read::<HCapsule>()
         }
 
         #[capsule]
-        fn f<'a>(ECapsule(e): ECapsule, handle: impl SideEffectHandle<'a>) -> u8 {
-            handle.register(());
-            e
+        fn f(reader: &mut impl CapsuleReader, _: side_effects::SideEffectRegistrant<'_>) -> u8 {
+            reader.read::<ECapsule>()
         }
 
         #[capsule]
-        const fn g(CCapsule(c): CCapsule, FCapsule(f): FCapsule) -> u8 {
-            c + f
+        fn g(reader: &mut impl CapsuleReader) -> u8 {
+            reader.read::<CCapsule>() + reader.read::<FCapsule>()
         }
 
         #[capsule]
@@ -758,7 +729,7 @@ mod tests {
             assert_eq!(txn.try_read::<HCapsule>(), None);
         });
 
-        rearch::read!(container, DCapsule, GCapsule);
+        container.read((DCapsule, GCapsule));
 
         container.with_read_txn(|txn| {
             read_txn_counter += 1;
@@ -773,7 +744,7 @@ mod tests {
             assert_eq!(txn.try_read::<HCapsule>().unwrap(), 1);
         });
 
-        rearch::read!(container, StatefulACapsule).1(10);
+        container.read(StatefulACapsule).1(10);
 
         container.with_read_txn(|txn| {
             read_txn_counter += 1;
