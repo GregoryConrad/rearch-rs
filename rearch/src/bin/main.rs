@@ -13,13 +13,13 @@ fn count() -> i32 {
 
 #[capsule]
 fn count_plus_one(reader: &mut impl CapsuleReader) -> i32 {
-    reader.read::<CountCapsule>() + 1
+    reader.read(CountCapsule) + 1
 }
 
 #[capsule]
 fn crazy(reader: &mut impl CapsuleReader) -> &'static str {
-    reader.read::<CountCapsule>();
-    reader.read::<CountPlusOneCapsule>();
+    reader.read(CountCapsule);
+    reader.read(CountPlusOneCapsule);
     "crazy!"
 }
 
@@ -27,9 +27,9 @@ fn crazy(reader: &mut impl CapsuleReader) -> &'static str {
 fn big_string_factory(
     reader: &mut impl CapsuleReader,
 ) -> Arc<dyn Fn(&str) -> String + Send + Sync> {
-    let count = reader.read::<CountCapsule>();
-    let count_plus_one = reader.read::<CountPlusOneCapsule>();
-    let crazy = reader.read::<CrazyCapsule>();
+    let count = reader.read(CountCapsule);
+    let count_plus_one = reader.read(CountPlusOneCapsule);
+    let crazy = reader.read(CrazyCapsule);
     Arc::new(move |other| {
         format!("param: {other}, count: {count}, count_plus_one: {count_plus_one}, crazy: {crazy}")
     })
@@ -37,7 +37,7 @@ fn big_string_factory(
 
 #[capsule]
 fn uses_factory(reader: &mut impl CapsuleReader) -> String {
-    reader.read::<BigStringFactoryCapsule>()("argument supplied to factory")
+    reader.read(BigStringFactoryCapsule)("argument supplied to factory")
 }
 
 #[capsule]

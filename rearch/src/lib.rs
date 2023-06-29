@@ -37,7 +37,10 @@ pub mod side_effects;
 /// Capsules are blueprints for creating some immutable data
 /// and do not actually contain any data themselves.
 /// See the README for more.
-pub trait Capsule {
+// `Send` is required because `CapsuleManager` needs to store a copy of the capsule.
+// This restriction can probably be dropped once/if Rust supports const generic fn pointers
+// (so that Capsule::build does not need a &self)
+pub trait Capsule: Send {
     /// The type of data associated with this capsule.
     /// Capsule types must be `Clone + Send + Sync + 'static`.
     /// It is recommended to only put types with "cheap" clones in Capsules;
@@ -63,8 +66,8 @@ pub trait Capsule {
     ///
     /// ABSOLUTELY DO NOT TRIGGER ANY REBUILDS WITHIN THIS FUNCTION!
     /// Doing so will result in a deadlock.
-    // TODO make this take &self to hopefully provide first class fn support in future?
     fn build(
+        &self,
         reader: &mut impl CapsuleReader<Data = Self::Data>,
         effect: <Self::Effect as SideEffect>::Api<'_>,
     ) -> Self::Data;
@@ -90,7 +93,7 @@ pub trait CapsuleReader {
     /// Reads the current data of the supplied capsule, initializing it if needed.
     /// Internally forms a dependency graph amongst capsules, so feel free to conditionally invoke
     /// this function in case you only conditionally need a capsule's value.
-    fn read<O: Capsule + 'static>(&mut self) -> O::Data;
+    fn read<O: Capsule + 'static>(&mut self, capsule: O) -> O::Data;
 
     /// Reads the current value of this capsule, if there is one
     /// (there won't be on a first build or directly after being garbage collected).
@@ -228,11 +231,12 @@ macro_rules! generate_capsule_list_impl {
             impl<$($C: Capsule + 'static),*> CapsuleList for ($($C),*) {
                 type Data = ($($C::Data),*);
                 fn read(self, container: &Container) -> Self::Data {
+                    let ($([<i $C>]),*) = self;
                     if let ($(Some([<i $C>])),*) =
-                        container.with_read_txn(|txn| ($(txn.try_read::<$C>()),*)) {
+                        container.with_read_txn(|txn| ($(txn.try_read_raw::<$C>()),*)) {
                         ($([<i $C>]),*)
                     } else {
-                        container.with_write_txn(|txn| ($(txn.read_or_init::<$C>()),*))
+                        container.with_write_txn(|txn| ($(txn.read_or_init([<i $C>])),*))
                     }
                 }
             }
@@ -320,7 +324,13 @@ pub struct ContainerReadTxn<'a> {
 }
 impl ContainerReadTxn<'_> {
     #[must_use]
-    pub fn try_read<C: Capsule + 'static>(&self) -> Option<C::Data> {
+    #[allow(unused_variables, clippy::needless_pass_by_value)]
+    pub fn try_read<C: Capsule + 'static>(&self, capsule: C) -> Option<C::Data> {
+        self.try_read_raw::<C>()
+    }
+
+    /// Tries a capsule read, but doesn't require an instance of the capsule itself
+    fn try_read_raw<C: Capsule + 'static>(&self) -> Option<C::Data> {
         let id = TypeId::of::<C>();
         self.data.get(&id).map(|data| {
             let data: Box<dyn Any> = data.clone();
@@ -338,25 +348,20 @@ pub struct ContainerWriteTxn<'a> {
 }
 impl ContainerWriteTxn<'_> {
     #[must_use]
-    pub fn try_read<C: Capsule + 'static>(&self) -> Option<C::Data> {
-        let id = TypeId::of::<C>();
-        self.data.get(&id).map(|data| {
-            let data: Box<dyn Any> = data.clone();
-            *data
-                .downcast::<C::Data>()
-                .expect("Types should be properly enforced due to generics")
-        })
+    #[allow(unused_variables, clippy::needless_pass_by_value)]
+    pub fn try_read<C: Capsule + 'static>(&self, capsule: C) -> Option<C::Data> {
+        self.try_read_raw::<C>()
     }
 
-    pub fn read_or_init<C: Capsule + 'static>(&mut self) -> C::Data {
+    pub fn read_or_init<C: Capsule + 'static>(&mut self, capsule: C) -> C::Data {
         let id = TypeId::of::<C>();
         if !self.data.contains_key(&id) {
             #[cfg(feature = "logging")]
             log::debug!("Initializing {} ({:?})", std::any::type_name::<C>(), id);
 
-            self.build_capsule::<C>();
+            self.build_capsule(capsule);
         }
-        self.try_read::<C>()
+        self.try_read_raw::<C>()
             .expect("Data should be present due to checking/building capsule above")
     }
 }
@@ -419,14 +424,27 @@ impl ContainerWriteTxn<'_> {
     */
 }
 impl ContainerWriteTxn<'_> {
+    /// Tries a capsule read, but doesn't require an instance of the capsule itself
+    fn try_read_raw<C: Capsule + 'static>(&self) -> Option<C::Data> {
+        let id = TypeId::of::<C>();
+        self.data.get(&id).map(|data| {
+            let data: Box<dyn Any> = data.clone();
+            *data
+                .downcast::<C::Data>()
+                .expect("Types should be properly enforced due to generics")
+        })
+    }
+
     /// Triggers a first build or rebuild for the supplied capsule
-    fn build_capsule<C: Capsule + 'static>(&mut self) {
+    fn build_capsule<C: Capsule + 'static>(&mut self, capsule: C) {
         let id = TypeId::of::<C>();
 
         // Ensure this capsule has a node for it in the graph
-        self.nodes
-            .entry(id)
-            .or_insert_with(|| CapsuleManager::new::<C>(self.rebuilder.clone()));
+        if let std::collections::hash_map::Entry::Vacant(e) = self.nodes.entry(id) {
+            let rebuilder = self.rebuilder.clone();
+            let manager = CapsuleManager::new(capsule, rebuilder);
+            e.insert(manager);
+        }
 
         self.build_capsule_or_panic(id);
     }
@@ -541,6 +559,7 @@ impl ContainerWriteTxn<'_> {
 // We avoid needing types by storing a fn pointer of a function that performs the actual build.
 // A capsule's build is a capsule's only type-specific behavior!
 struct CapsuleManager {
+    capsule: Box<dyn Any + Send>,
     dependencies: HashSet<TypeId>,
     dependents: HashSet<TypeId>,
     side_effect: Box<dyn Any + Send>,
@@ -548,8 +567,9 @@ struct CapsuleManager {
     build: fn(&mut ContainerWriteTxn),
 }
 impl CapsuleManager {
-    fn new<C: Capsule + 'static>(rebuilder: CapsuleRebuilder) -> Self {
+    fn new<C: Capsule + 'static>(capsule: C, rebuilder: CapsuleRebuilder) -> Self {
         Self {
+            capsule: Box::new(capsule),
             dependencies: HashSet::new(),
             dependents: HashSet::new(),
             side_effect: Box::new(C::init_side_effect()),
@@ -566,6 +586,7 @@ impl CapsuleManager {
 
         let manager = txn.node_or_panic(id);
         let rebuilder = manager.rebuilder.clone();
+        let capsule = std::mem::replace(&mut manager.capsule, Box::new(()));
         let mut side_effect = std::mem::replace(&mut manager.side_effect, Box::new(()))
             .downcast::<C::Effect>()
             .expect("Types should be properly enforced due to generics");
@@ -581,6 +602,9 @@ impl CapsuleManager {
         }));
 
         let new_data = C::build(
+            capsule
+                .downcast_ref::<C>()
+                .expect("Types should be properly enforced due to generics"),
             &mut CapsuleReaderImpl::<C> {
                 txn,
                 ghost: PhantomData,
@@ -589,6 +613,7 @@ impl CapsuleManager {
         );
 
         let manager = txn.node_or_panic(id);
+        manager.capsule = capsule;
         manager.side_effect = side_effect;
 
         txn.data.insert(id, Box::new(new_data));
@@ -610,7 +635,7 @@ struct CapsuleReaderImpl<'txn_scope, 'txn_total, C: Capsule + 'static> {
 impl<C: Capsule + 'static> CapsuleReader for CapsuleReaderImpl<'_, '_, C> {
     type Data = C::Data;
 
-    fn read<O: Capsule + 'static>(&mut self) -> O::Data {
+    fn read<O: Capsule + 'static>(&mut self, capsule: O) -> O::Data {
         let (this, other) = (TypeId::of::<C>(), TypeId::of::<O>());
         assert_ne!(
             this, other,
@@ -619,7 +644,7 @@ impl<C: Capsule + 'static> CapsuleReader for CapsuleReaderImpl<'_, '_, C> {
         );
 
         // Get the value (and make sure the other manager is initialized!)
-        let data = self.txn.read_or_init::<O>();
+        let data = self.txn.read_or_init(capsule);
 
         // Take care of some dependency housekeeping
         self.txn.node_or_panic(other).dependents.insert(this);
@@ -629,7 +654,7 @@ impl<C: Capsule + 'static> CapsuleReader for CapsuleReaderImpl<'_, '_, C> {
     }
 
     fn read_self(&self) -> Option<Self::Data> {
-        self.txn.try_read::<C>()
+        self.txn.try_read_raw::<C>()
     }
 }
 
@@ -655,7 +680,7 @@ mod tests {
             type Data = u8;
             type Effect = ();
             fn init_side_effect() -> Self::Effect {}
-            fn build(_: &mut impl CapsuleReader<Data = Self::Data>, _: ()) -> Self::Data {
+            fn build(&self, _: &mut impl CapsuleReader<Data = Self::Data>, _: ()) -> Self::Data {
                 0
             }
         }
@@ -664,8 +689,12 @@ mod tests {
             type Data = u8;
             type Effect = ();
             fn init_side_effect() -> Self::Effect {}
-            fn build(reader: &mut impl CapsuleReader<Data = Self::Data>, _: ()) -> Self::Data {
-                reader.read::<CountCapsule>() + 1
+            fn build(
+                &self,
+                reader: &mut impl CapsuleReader<Data = Self::Data>,
+                _: (),
+            ) -> Self::Data {
+                reader.read(CountCapsule) + 1
             }
         }
 
@@ -673,17 +702,17 @@ mod tests {
         assert_eq!(
             (None, None),
             container.with_read_txn(|txn| (
-                txn.try_read::<CountCapsule>(),
-                txn.try_read::<CountPlusOneCapsule>()
+                txn.try_read(CountCapsule),
+                txn.try_read(CountPlusOneCapsule)
             ))
         );
         assert_eq!(
             1,
-            container.with_write_txn(|txn| txn.read_or_init::<CountPlusOneCapsule>())
+            container.with_write_txn(|txn| txn.read_or_init(CountPlusOneCapsule))
         );
         assert_eq!(
             0,
-            container.with_read_txn(|txn| txn.try_read::<CountCapsule>().unwrap())
+            container.with_read_txn(|txn| txn.try_read(CountCapsule).unwrap())
         );
 
         let container = Container::new();
@@ -732,6 +761,7 @@ mod tests {
                 side_effects::StateEffect::new(0)
             }
             fn build(
+                &self,
                 _: &mut impl CapsuleReader<Data = Self::Data>,
                 (state, set_state): <Self::Effect as SideEffect>::Api<'_>,
             ) -> Self::Data {
@@ -744,8 +774,12 @@ mod tests {
             type Data = u8;
             type Effect = ();
             fn init_side_effect() -> Self::Effect {}
-            fn build(reader: &mut impl CapsuleReader<Data = Self::Data>, _: ()) -> Self::Data {
-                reader.read::<StateCapsule>().0 + 1
+            fn build(
+                &self,
+                reader: &mut impl CapsuleReader<Data = Self::Data>,
+                _: (),
+            ) -> Self::Data {
+                reader.read(StateCapsule).0 + 1
             }
         }
     }
@@ -771,37 +805,37 @@ mod tests {
 
         #[capsule]
         fn a(reader: &mut impl CapsuleReader) -> u8 {
-            reader.read::<StatefulACapsule>().0
+            reader.read(StatefulACapsule).0
         }
 
         #[capsule]
         fn b(reader: &mut impl CapsuleReader, _: side_effects::SideEffectRegistrar<'_>) -> u8 {
-            reader.read::<ACapsule>() + 1
+            reader.read(ACapsule) + 1
         }
 
         #[capsule]
         fn c(reader: &mut impl CapsuleReader) -> u8 {
-            reader.read::<BCapsule>() + reader.read::<FCapsule>()
+            reader.read(BCapsule) + reader.read(FCapsule)
         }
 
         #[capsule]
         fn d(reader: &mut impl CapsuleReader) -> u8 {
-            reader.read::<CCapsule>()
+            reader.read(CCapsule)
         }
 
         #[capsule]
         fn e(reader: &mut impl CapsuleReader) -> u8 {
-            reader.read::<ACapsule>() + reader.read::<HCapsule>()
+            reader.read(ACapsule) + reader.read(HCapsule)
         }
 
         #[capsule]
         fn f(reader: &mut impl CapsuleReader, _: side_effects::SideEffectRegistrar<'_>) -> u8 {
-            reader.read::<ECapsule>()
+            reader.read(ECapsule)
         }
 
         #[capsule]
         fn g(reader: &mut impl CapsuleReader) -> u8 {
-            reader.read::<CCapsule>() + reader.read::<FCapsule>()
+            reader.read(CCapsule) + reader.read(FCapsule)
         }
 
         #[capsule]
@@ -814,45 +848,45 @@ mod tests {
 
         container.with_read_txn(|txn| {
             read_txn_counter += 1;
-            assert!(txn.try_read::<StatefulACapsule>().is_none());
-            assert_eq!(txn.try_read::<ACapsule>(), None);
-            assert_eq!(txn.try_read::<BCapsule>(), None);
-            assert_eq!(txn.try_read::<CCapsule>(), None);
-            assert_eq!(txn.try_read::<DCapsule>(), None);
-            assert_eq!(txn.try_read::<ECapsule>(), None);
-            assert_eq!(txn.try_read::<FCapsule>(), None);
-            assert_eq!(txn.try_read::<GCapsule>(), None);
-            assert_eq!(txn.try_read::<HCapsule>(), None);
+            assert!(txn.try_read(StatefulACapsule).is_none());
+            assert_eq!(txn.try_read(ACapsule), None);
+            assert_eq!(txn.try_read(BCapsule), None);
+            assert_eq!(txn.try_read(CCapsule), None);
+            assert_eq!(txn.try_read(DCapsule), None);
+            assert_eq!(txn.try_read(ECapsule), None);
+            assert_eq!(txn.try_read(FCapsule), None);
+            assert_eq!(txn.try_read(GCapsule), None);
+            assert_eq!(txn.try_read(HCapsule), None);
         });
 
         container.read((DCapsule, GCapsule));
 
         container.with_read_txn(|txn| {
             read_txn_counter += 1;
-            assert!(txn.try_read::<StatefulACapsule>().is_some());
-            assert_eq!(txn.try_read::<ACapsule>().unwrap(), 0);
-            assert_eq!(txn.try_read::<BCapsule>().unwrap(), 1);
-            assert_eq!(txn.try_read::<CCapsule>().unwrap(), 2);
-            assert_eq!(txn.try_read::<DCapsule>().unwrap(), 2);
-            assert_eq!(txn.try_read::<ECapsule>().unwrap(), 1);
-            assert_eq!(txn.try_read::<FCapsule>().unwrap(), 1);
-            assert_eq!(txn.try_read::<GCapsule>().unwrap(), 3);
-            assert_eq!(txn.try_read::<HCapsule>().unwrap(), 1);
+            assert!(txn.try_read(StatefulACapsule).is_some());
+            assert_eq!(txn.try_read(ACapsule).unwrap(), 0);
+            assert_eq!(txn.try_read(BCapsule).unwrap(), 1);
+            assert_eq!(txn.try_read(CCapsule).unwrap(), 2);
+            assert_eq!(txn.try_read(DCapsule).unwrap(), 2);
+            assert_eq!(txn.try_read(ECapsule).unwrap(), 1);
+            assert_eq!(txn.try_read(FCapsule).unwrap(), 1);
+            assert_eq!(txn.try_read(GCapsule).unwrap(), 3);
+            assert_eq!(txn.try_read(HCapsule).unwrap(), 1);
         });
 
         container.read(StatefulACapsule).1(10);
 
         container.with_read_txn(|txn| {
             read_txn_counter += 1;
-            assert!(txn.try_read::<StatefulACapsule>().is_some());
-            assert_eq!(txn.try_read::<ACapsule>().unwrap(), 10);
-            assert_eq!(txn.try_read::<BCapsule>().unwrap(), 11);
-            assert_eq!(txn.try_read::<CCapsule>(), None);
-            assert_eq!(txn.try_read::<DCapsule>(), None);
-            assert_eq!(txn.try_read::<ECapsule>().unwrap(), 11);
-            assert_eq!(txn.try_read::<FCapsule>().unwrap(), 11);
-            assert_eq!(txn.try_read::<GCapsule>(), None);
-            assert_eq!(txn.try_read::<HCapsule>().unwrap(), 1);
+            assert!(txn.try_read(StatefulACapsule).is_some());
+            assert_eq!(txn.try_read(ACapsule).unwrap(), 10);
+            assert_eq!(txn.try_read(BCapsule).unwrap(), 11);
+            assert_eq!(txn.try_read(CCapsule), None);
+            assert_eq!(txn.try_read(DCapsule), None);
+            assert_eq!(txn.try_read(ECapsule).unwrap(), 11);
+            assert_eq!(txn.try_read(FCapsule).unwrap(), 11);
+            assert_eq!(txn.try_read(GCapsule), None);
+            assert_eq!(txn.try_read(HCapsule).unwrap(), 1);
         });
 
         assert_eq!(read_txn_counter, 3);

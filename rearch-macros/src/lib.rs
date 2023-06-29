@@ -48,6 +48,7 @@ pub fn capsule(_attr: TokenStream, item: TokenStream) -> TokenStream {
             type Data = #capsule_type;
             #effect_part_impl
             fn build(
+                &self,
                 reader: &mut impl rearch::CapsuleReader<Data = Self::Data>,
                 effect_api: <Self::Effect as rearch::SideEffect>::Api<'_>
             ) -> Self::Data {
