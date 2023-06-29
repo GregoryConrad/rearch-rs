@@ -1,10 +1,6 @@
 use std::sync::Arc;
 
-use rearch::{
-    capsule,
-    side_effects::{SideEffectRegistrar, StateEffect},
-    CapsuleReader, Container,
-};
+use rearch::{capsule, side_effects::StateEffect, CapsuleReader, Container, SideEffectRegistrar};
 
 #[capsule]
 fn count() -> i32 {

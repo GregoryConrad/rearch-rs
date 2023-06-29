@@ -1,4 +1,4 @@
-use std::{any::Any, cell::OnceCell, marker::PhantomData, sync::Arc};
+use std::{cell::OnceCell, marker::PhantomData, sync::Arc};
 
 use crate::{SideEffect, SideEffectRebuilder};
 
@@ -37,88 +37,6 @@ generate_tuple_side_effect_impl!(A, B, C, D, E);
 generate_tuple_side_effect_impl!(A, B, C, D, E, F);
 generate_tuple_side_effect_impl!(A, B, C, D, E, F, G);
 generate_tuple_side_effect_impl!(A, B, C, D, E, F, G, H);
-
-/// Provides a mechanism to register an arbitrary side effect in the build method.
-#[derive(Default)]
-pub struct SideEffectHandle(OnceCell<Box<dyn Any + Send>>);
-impl SideEffectHandle {
-    #[must_use]
-    pub const fn new() -> Self {
-        Self(OnceCell::new())
-    }
-}
-impl SideEffect for SideEffectHandle {
-    type Api<'a> = SideEffectRegistrar<'a>;
-
-    fn api(&mut self, rebuild: Rebuilder<Self>) -> Self::Api<'_> {
-        SideEffectRegistrar::new(&mut self.0, rebuild)
-    }
-}
-
-/// Registers the given side effect and returns its build api.
-/// You can only call register once on purpose (it consumes self);
-/// to register multiple side effects, pass them in together as a tuple.
-pub struct SideEffectRegistrar<'a> {
-    side_effect: &'a mut OnceCell<Box<dyn Any + Send>>,
-    rebuild: Rebuilder<SideEffectHandle>,
-}
-impl<'a> SideEffectRegistrar<'a> {
-    /// Creates a new `SideEffectRegistrar`.
-    /// This function is public to enable easy mocking in tests.
-    pub fn new(
-        side_effect: &'a mut OnceCell<Box<dyn Any + Send>>,
-        rebuild: Rebuilder<SideEffectHandle>,
-    ) -> Self {
-        Self {
-            side_effect,
-            rebuild,
-        }
-    }
-}
-
-macro_rules! generate_side_effect_registrant_fn_impl {
-    ($($types:ident),+) => {
-        #[allow(unused_parens, non_snake_case)]
-        impl<'a, $($types: SideEffect),*> FnOnce<($($types,)*)> for SideEffectRegistrar<'a> {
-            type Output = ($($types::Api<'a>),*);
-
-            extern "rust-call" fn call_once(self, args: ($($types,)*)) -> Self::Output {
-                let failed_cast_msg =
-                    "The SideEffect registered with SideEffectRegistrar cannot be changed!";
-
-                let ($($types,)*) = args;
-                self.side_effect.get_or_init(|| Box::new(($($types),*)));
-                let effect = self
-                    .side_effect
-                    .get_mut()
-                    .expect("Side effect should've been initialized above")
-                    .downcast_mut::<($($types),*)>()
-                    .expect(failed_cast_msg);
-
-                effect.api(Box::new(move |mutation| {
-                    (self.rebuild)(Box::new(|handle| {
-                        let effect = handle
-                            .0
-                            .get_mut()
-                            .expect("Side effect should've been initialized in previous build")
-                            .downcast_mut::<($($types),*)>()
-                            .expect(failed_cast_msg);
-                        mutation(effect);
-                    }));
-                }))
-            }
-        }
-    }
-}
-
-generate_side_effect_registrant_fn_impl!(A);
-generate_side_effect_registrant_fn_impl!(A, B);
-generate_side_effect_registrant_fn_impl!(A, B, C);
-generate_side_effect_registrant_fn_impl!(A, B, C, D);
-generate_side_effect_registrant_fn_impl!(A, B, C, D, E);
-generate_side_effect_registrant_fn_impl!(A, B, C, D, E, F);
-generate_side_effect_registrant_fn_impl!(A, B, C, D, E, F, G);
-generate_side_effect_registrant_fn_impl!(A, B, C, D, E, F, G, H);
 
 pub struct StateEffect<T>(T);
 impl<T> StateEffect<T> {
@@ -339,6 +257,7 @@ where
     }
 }
 
+// TODO logging side effect for the logging feature, and convert below too
 /*
 #[cfg(feature = "tokio-side-effects")]
 fn future_from_fn<R, Future>(

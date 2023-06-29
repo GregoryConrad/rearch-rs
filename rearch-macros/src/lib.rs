@@ -13,7 +13,7 @@ pub fn capsule(_attr: TokenStream, item: TokenStream) -> TokenStream {
         // The capsule reader
         syn::Type::Reference(_) => quote! { reader },
         // The side effect handle
-        syn::Type::Path(_) => quote! { effect_api },
+        syn::Type::Path(_) => quote! { register },
         // We don't allow for any other type of parameters
         _ => panic!(concat!(
             "Capsule functions can only consume ",
@@ -25,20 +25,6 @@ pub fn capsule(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let is_super_pure =
         process_capsule_fn_params(&input, |ty| !matches!(ty, syn::Type::Path(_))).all(|b| b);
 
-    let effect_part_impl = if is_super_pure {
-        quote! {
-            type Effect = ();
-            fn init_side_effect() -> Self::Effect {}
-        }
-    } else {
-        quote! {
-            type Effect = rearch::side_effects::SideEffectHandle;
-            fn init_side_effect() -> Self::Effect {
-                rearch::side_effects::SideEffectHandle::new()
-            }
-        }
-    };
-
     let capsule_impl = quote! {
         #input
 
@@ -46,11 +32,10 @@ pub fn capsule(_attr: TokenStream, item: TokenStream) -> TokenStream {
 
         impl rearch::Capsule for #capsule_name {
             type Data = #capsule_type;
-            #effect_part_impl
             fn build(
                 &self,
                 reader: &mut impl rearch::CapsuleReader<Data = Self::Data>,
-                effect_api: <Self::Effect as rearch::SideEffect>::Api<'_>
+                register: rearch::SideEffectRegistrar<'_>
             ) -> Self::Data {
                 #fn_name(#(#args),*)
             }
