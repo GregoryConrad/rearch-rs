@@ -656,8 +656,7 @@ impl CapsuleReader<'_, '_> {
 /// You can only call register once on purpose (it consumes self);
 /// to register multiple side effects, simply pass them in together!
 /// If you have a super pure capsule that you wish to make not super pure,
-/// call register with the special `()` side effect.
-// TODO consider having a no-arg impl of the registrar
+/// simply call `register()` with no arguments.
 pub struct SideEffectRegistrar<'a> {
     side_effect: &'a mut OnceCell<Box<dyn Any + Send>>,
     rebuild: Box<dyn SideEffectRebuilder<Box<dyn Any + Send>>>,
@@ -678,6 +677,27 @@ impl<'a> SideEffectRegistrar<'a> {
     }
 }
 
+const EFFECT_FAILED_CAST_MSG: &str =
+    "The SideEffect registered with SideEffectRegistrar cannot be changed!";
+
+// Empty register() for the no-op side effect
+impl FnOnce<()> for SideEffectRegistrar<'_> {
+    type Output = ();
+    extern "rust-call" fn call_once(self, _: ()) -> Self::Output {
+        // Initialize with the no-op side effect
+        self.side_effect.get_or_init(|| Box::new(()));
+
+        // Ensure side effect wasn't changed
+        assert!(
+            self.side_effect
+                .get_mut()
+                .expect("Side effect should've been initialized above")
+                .is::<()>(),
+            "You cannot change the side effect(s) passed to register()!"
+        );
+    }
+}
+
 macro_rules! generate_side_effect_registrar_fn_impl {
     ($($types:ident),+) => {
         #[allow(unused_parens, non_snake_case)]
@@ -685,9 +705,6 @@ macro_rules! generate_side_effect_registrar_fn_impl {
             type Output = ($($types::Api<'a>),*);
 
             extern "rust-call" fn call_once(self, args: ($($types,)*)) -> Self::Output {
-                let failed_cast_msg =
-                    "The SideEffect registered with SideEffectRegistrar cannot be changed!";
-
                 let ($($types,)*) = args;
                 self.side_effect.get_or_init(|| Box::new(($($types),*)));
                 let effect = self
@@ -695,13 +712,13 @@ macro_rules! generate_side_effect_registrar_fn_impl {
                     .get_mut()
                     .expect("Side effect should've been initialized above")
                     .downcast_mut::<($($types),*)>()
-                    .expect(failed_cast_msg);
+                    .expect(EFFECT_FAILED_CAST_MSG);
 
                 effect.api(Box::new(move |mutation| {
                     (self.rebuild)(Box::new(|effect| {
                         let effect = effect
                             .downcast_mut::<($($types),*)>()
-                            .expect(failed_cast_msg);
+                            .expect(EFFECT_FAILED_CAST_MSG);
                         mutation(effect);
                     }));
                 }))
@@ -709,7 +726,6 @@ macro_rules! generate_side_effect_registrar_fn_impl {
         }
     }
 }
-
 generate_side_effect_registrar_fn_impl!(A);
 generate_side_effect_registrar_fn_impl!(A, B);
 generate_side_effect_registrar_fn_impl!(A, B, C);
