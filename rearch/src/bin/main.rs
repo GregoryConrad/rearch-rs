@@ -35,7 +35,7 @@ fn uses_factory(mut reader: CapsuleReader, _: SideEffectRegistrar) -> String {
 fn stateful(
     _: CapsuleReader,
     register: SideEffectRegistrar,
-) -> (u8, std::sync::Arc<dyn Fn(u8) + Send + Sync>) {
+) -> (u32, Arc<dyn Fn(u32) + Send + Sync>) {
     let (state, set_state) = register(StateEffect::new(0));
     (*state, set_state)
 }
@@ -50,4 +50,9 @@ fn main() {
     set_state(1);
     let (state, _) = container.read(stateful);
     assert_eq!(state, 1);
+
+    // Quick little benchmark to test graph update speeds and get a flamegraph
+    for i in 0..2_000_000 {
+        set_state(i);
+    }
 }

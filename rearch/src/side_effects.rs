@@ -4,9 +4,10 @@ use crate::{SideEffect, SideEffectRebuilder};
 
 type Rebuilder<T> = Box<dyn SideEffectRebuilder<T>>;
 
-// Note: We use Arc<Fn()>/Box<dyn Fn()> extensively throughout the SideEffect::Apis in order to:
-// - Improve our users' testability (it is difficult to mock static dispatch in SideEffect::Apis)
-// - Avoid yet another nightly requirement (`type Foo = impl Bar;` currently requires nightly)
+// Note: We use Arc/Box<dyn Fn()> extensively throughout the SideEffect::Apis in order to:
+// - Improve users' testability (it is difficult to mock static dispatch from SideEffect::Apis)
+// - Improve performance (somehow Arc performed slightly better than static dispatch on benchmarks)
+// - Avoid yet another nightly requirement (feature gate `impl_trait_in_assoc_type`)
 
 macro_rules! generate_tuple_side_effect_impl {
     ($($types:ident),*) => {
