@@ -535,21 +535,25 @@ impl ContainerWriteTxn<'_> {
 // that we used to have when dealing with the graph nodes.
 // We avoid needing types by storing a fn pointer of a function that performs the actual build.
 // A capsule's build is a capsule's only type-specific behavior!
+// Note: we use Option over a few fields below to enforce a safer memory model of ownership
+// (ownership of some of the CapsuleManager's fields must be taken during builds).
+const EX_OWNER_MSG: &str =
+    "Attempted to use a CapsuleManager field when someone else already had ownership";
 struct CapsuleManager {
-    capsule: Box<dyn Any + Send>, // TODO replace with Option<...> to be "safer"
+    capsule: Option<Box<dyn Any + Send>>,
     dependencies: HashSet<TypeId>,
     dependents: HashSet<TypeId>,
-    side_effect: OnceCell<Box<dyn Any + Send>>, // TODO replace with Option<...> to be "safer"
+    side_effect: Option<OnceCell<Box<dyn Any + Send>>>,
     rebuilder: CapsuleRebuilder,
     build: fn(&mut ContainerWriteTxn),
 }
 impl CapsuleManager {
     fn new<C: Capsule>(capsule: C, rebuilder: CapsuleRebuilder) -> Self {
         Self {
-            capsule: Box::new(capsule),
+            capsule: Some(Box::new(capsule)),
             dependencies: HashSet::new(),
             dependents: HashSet::new(),
-            side_effect: OnceCell::new(),
+            side_effect: Some(OnceCell::new()),
             rebuilder,
             build: Self::build::<C>,
         }
@@ -562,13 +566,14 @@ impl CapsuleManager {
         log::trace!("Building {} ({:?})", std::any::type_name::<C>(), id);
 
         let manager = txn.node_or_panic(id);
-        let capsule = std::mem::replace(&mut manager.capsule, Box::new(()));
-        let mut side_effect = std::mem::replace(&mut manager.side_effect, OnceCell::new());
+        let capsule = std::mem::take(&mut manager.capsule).expect(EX_OWNER_MSG);
+        let mut side_effect = std::mem::take(&mut manager.side_effect).expect(EX_OWNER_MSG);
         let rebuilder = {
             let rebuilder = manager.rebuilder.clone();
             Box::new(move |mutation: Box<dyn FnOnce(&mut Box<_>)>| {
                 rebuilder.rebuild(id, |manager| {
-                    let effect = manager.side_effect.get_mut().expect(concat!(
+                    let effect = manager.side_effect.as_mut().expect(EX_OWNER_MSG);
+                    let effect = effect.get_mut().expect(concat!(
                         "The side effect must've been previously initialized ",
                         "in order to use the rebuilder"
                     ));
@@ -586,14 +591,18 @@ impl CapsuleManager {
         );
 
         let manager = txn.node_or_panic(id);
-        manager.capsule = capsule;
-        manager.side_effect = side_effect;
+        manager.capsule = Some(capsule);
+        manager.side_effect = Some(side_effect);
 
         txn.data.insert(id, Box::new(new_data));
     }
 
     fn is_super_pure(&self) -> bool {
-        self.side_effect.get().is_none()
+        self.side_effect
+            .as_ref()
+            .expect(EX_OWNER_MSG)
+            .get()
+            .is_none()
     }
 
     fn is_disposable(&self) -> bool {
