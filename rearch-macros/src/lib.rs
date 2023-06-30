@@ -22,7 +22,7 @@ pub fn capsule(_attr: TokenStream, item: TokenStream) -> TokenStream {
         )),
     });
 
-    let is_super_pure =
+    let _is_super_pure =
         process_capsule_fn_params(&input, |ty| !matches!(ty, syn::Type::Path(_))).all(|b| b);
 
     let capsule_impl = quote! {

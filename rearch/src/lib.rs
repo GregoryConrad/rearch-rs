@@ -27,10 +27,10 @@ use std::{
     any::{Any, TypeId},
     cell::OnceCell,
     collections::HashSet,
-    marker::PhantomData,
     sync::{Arc, Mutex, Weak},
 };
 
+#[cfg(feature = "macros")]
 pub use rearch_macros::capsule;
 
 pub mod side_effects;
@@ -57,27 +57,18 @@ pub trait Capsule: Send + 'static {
     ///
     /// ABSOLUTELY DO NOT TRIGGER ANY REBUILDS WITHIN THIS FUNCTION!
     /// Doing so will result in a deadlock.
-    fn build(
-        &self,
-        reader: &mut impl CapsuleReader<Data = Self::Data>,
-        effect: SideEffectRegistrar<'_>,
-    ) -> Self::Data;
+    fn build(&self, reader: CapsuleReader, effect: SideEffectRegistrar) -> Self::Data;
 }
 
 impl<T, F> Capsule for F
 where
     T: CapsuleType,
-    // TODO this Fn should take CapsuleReader struct
-    F: Fn(SideEffectRegistrar<'_>) -> T + Send + 'static,
+    F: Fn(CapsuleReader, SideEffectRegistrar) -> T + Send + 'static,
 {
     type Data = T;
 
-    fn build(
-        &self,
-        reader: &mut impl CapsuleReader<Data = Self::Data>,
-        registrar: SideEffectRegistrar<'_>,
-    ) -> Self::Data {
-        self(registrar)
+    fn build(&self, reader: CapsuleReader, registrar: SideEffectRegistrar) -> Self::Data {
+        self(reader, registrar)
     }
 }
 
@@ -85,28 +76,6 @@ where
 pub trait CapsuleType: Any + DynClone + Send + Sync + 'static {}
 impl<T: Clone + Send + Sync + 'static> CapsuleType for T {}
 dyn_clone::clone_trait_object!(CapsuleType);
-
-/// Allows you to read the current data of capsules based on the given state of the container.
-// TODO Wrap around this with a FnOnce and FnMut impl somehow
-// CapsuleReader can't be made into trait obj, what else can we do?
-// Could force generics down user's throats, like:
-// `fn my_capsule<T: CapsuleReader>(get: Getter<'_, T>) {}`
-// but I am not a fan.
-// I think CapsuleReader could instead be a struct that has a private ContainerWriteTxn;
-// we can make that testable eventually by providing a mock CapsuleReader utility
-// Like MockCapsuleReaderBuilder::new().set(capsule, value).set(...).build()
-pub trait CapsuleReader {
-    type Data;
-
-    /// Reads the current data of the supplied capsule, initializing it if needed.
-    /// Internally forms a dependency graph amongst capsules, so feel free to conditionally invoke
-    /// this function in case you only conditionally need a capsule's value.
-    fn read<O: Capsule>(&mut self, capsule: O) -> O::Data;
-
-    /// Reads the current value of this capsule, if there is one
-    /// (there won't be on a first build or directly after being garbage collected).
-    fn read_self(&self) -> Option<Self::Data>;
-}
 
 /// Represents a side effect that can be utilized within the build method.
 /// The key observation about side effects is that they form a tree, where each side effect:
@@ -597,7 +566,7 @@ impl CapsuleManager {
         let mut side_effect = std::mem::replace(&mut manager.side_effect, OnceCell::new());
         let rebuilder = {
             let rebuilder = manager.rebuilder.clone();
-            Box::new(move |mutation: Box<dyn FnOnce(&mut Box<dyn Any + Send>)>| {
+            Box::new(move |mutation: Box<dyn FnOnce(&mut Box<_>)>| {
                 rebuilder.rebuild(id, |manager| {
                     let effect = manager.side_effect.get_mut().expect(concat!(
                         "The side effect must've been previously initialized ",
@@ -612,10 +581,7 @@ impl CapsuleManager {
             capsule
                 .downcast_ref::<C>()
                 .expect("Types should be properly enforced due to generics"),
-            &mut CapsuleReaderImpl::<C> {
-                txn,
-                ghost: PhantomData,
-            },
+            CapsuleReader { id, txn },
             SideEffectRegistrar::new(&mut side_effect, rebuilder),
         );
 
@@ -635,20 +601,36 @@ impl CapsuleManager {
     }
 }
 
-struct CapsuleReaderImpl<'txn_scope, 'txn_total, C: Capsule> {
-    txn: &'txn_scope mut ContainerWriteTxn<'txn_total>,
-    ghost: PhantomData<C::Data>, // phantom with C::T to prevent needing C to be Send + Sync
+/// Allows you to read the current data of capsules based on the given state of the container.
+// TODO FnOnce and FnMut impl for var args
+pub struct CapsuleReader<'scope, 'total> {
+    id: TypeId,
+    txn: &'scope mut ContainerWriteTxn<'total>,
+    // TODO mock utility, like MockCapsuleReaderBuilder::new().set(capsule, value).set(...).build()
+    // #[cfg(feature = "capsule-reader-mock")]
+    // mock: Option<CapsuleMocks>,
 }
-impl<C: Capsule> CapsuleReader for CapsuleReaderImpl<'_, '_, C> {
-    type Data = C::Data;
 
-    fn read<O: Capsule>(&mut self, capsule: O) -> O::Data {
-        let (this, other) = (TypeId::of::<C>(), TypeId::of::<O>());
-        assert_ne!(
-            this, other,
-            "A capsule tried depending upon itself (which isn't allowed)! {}",
-            "To read the current value of a capsule, instead use CapsuleReader::read_self()."
-        );
+impl CapsuleReader<'_, '_> {
+    /// Reads the current data of the supplied capsule, initializing it if needed.
+    /// Internally forms a dependency graph amongst capsules, so feel free to conditionally invoke
+    /// this function in case you only conditionally need a capsule's value.
+    ///
+    /// # Panics
+    /// Panics when a capsule attempts to read itself in its first build.
+    pub fn read<C: Capsule>(&mut self, capsule: C) -> C::Data {
+        let (this, other) = (self.id, TypeId::of::<C>());
+        if this == other {
+            return self.txn.try_read(capsule).unwrap_or_else(|| {
+                let capsule_name = std::any::type_name::<C>();
+                panic!(
+                    "Capsule {capsule_name} tried to read itself on its first build! {} {} {}",
+                    "This is disallowed since the capsule doesn't have any data to read yet.",
+                    "To avoid this issue, wrap the `read({capsule_name})` call in an if statement",
+                    "with the `IsFirstBuildEffect`."
+                );
+            });
+        }
 
         // Get the value (and make sure the other manager is initialized!)
         let data = self.txn.read_or_init(capsule);
@@ -659,28 +641,23 @@ impl<C: Capsule> CapsuleReader for CapsuleReaderImpl<'_, '_, C> {
 
         data
     }
-
-    fn read_self(&self) -> Option<Self::Data> {
-        self.txn.try_read_raw::<C>()
-    }
 }
-
-// TODO see if we can add these docs anywhere and then remove them
-// /// The `SideEffect` associated with this Capsule.
-// /// Every capsule has a side effect type, even super pure capsules.
-// /// (Super pure capsules should use `()` as their `Effect`.)
-// /// To use multiple side effects, set `Effect` as a tuple combining the different side effects.
-// type Effect: SideEffect;
 
 /// Registers the given side effect and returns its build api.
 /// You can only call register once on purpose (it consumes self);
-/// to register multiple side effects, pass them in together as a tuple.
+/// to register multiple side effects, simply pass them in together!
+/// If you have a super pure capsule that you wish to make not super pure,
+/// call register with the special `()` side effect.
+// TODO consider having a no-arg impl of the registrar
 pub struct SideEffectRegistrar<'a> {
     side_effect: &'a mut OnceCell<Box<dyn Any + Send>>,
     rebuild: Box<dyn SideEffectRebuilder<Box<dyn Any + Send>>>,
 }
 impl<'a> SideEffectRegistrar<'a> {
     /// Creates a new `SideEffectRegistrar`.
+    ///
+    /// This is public only to enable easier mocking in your code;
+    /// do not use this method in a non-test context.
     pub fn new(
         side_effect: &'a mut OnceCell<Box<dyn Any + Send>>,
         rebuild: Box<dyn SideEffectRebuilder<Box<dyn Any + Send>>>,
@@ -750,48 +727,29 @@ mod tests {
     fn basic_count() {
         use crate::*;
 
-        struct CountCapsule;
-        impl Capsule for CountCapsule {
-            type Data = u8;
-            fn build(
-                &self,
-                _: &mut impl CapsuleReader<Data = Self::Data>,
-                _: SideEffectRegistrar<'_>,
-            ) -> Self::Data {
-                0
-            }
+        fn count(_: CapsuleReader, _: SideEffectRegistrar) -> u8 {
+            0
         }
-        struct CountPlusOneCapsule;
-        impl Capsule for CountPlusOneCapsule {
-            type Data = u8;
-            fn build(
-                &self,
-                reader: &mut impl CapsuleReader<Data = Self::Data>,
-                _: SideEffectRegistrar<'_>,
-            ) -> Self::Data {
-                reader.read(CountCapsule) + 1
-            }
+        fn count_plus_one(mut reader: CapsuleReader, _: SideEffectRegistrar) -> u8 {
+            reader.read(count) + 1
         }
 
         let container = Container::new();
         assert_eq!(
             (None, None),
-            container.with_read_txn(|txn| (
-                txn.try_read(CountCapsule),
-                txn.try_read(CountPlusOneCapsule)
-            ))
+            container.with_read_txn(|txn| (txn.try_read(count), txn.try_read(count_plus_one)))
         );
         assert_eq!(
             1,
-            container.with_write_txn(|txn| txn.read_or_init(CountPlusOneCapsule))
+            container.with_write_txn(|txn| txn.read_or_init(count_plus_one))
         );
         assert_eq!(
             0,
-            container.with_read_txn(|txn| txn.try_read(CountCapsule).unwrap())
+            container.with_read_txn(|txn| txn.try_read(count).unwrap())
         );
 
         let container = Container::new();
-        assert_eq!((0, 1), container.read((CountCapsule, CountPlusOneCapsule)));
+        assert_eq!((0, 1), container.read((count, count_plus_one)));
     }
 
     mod state_updates {
@@ -818,33 +776,26 @@ mod tests {
         fn dependent_gets_updates() {
             let container = Container::new();
 
-            let ((state, set_state), plus_one) = container.read((stateful, DependentCapsule));
+            let ((state, set_state), plus_one) = container.read((stateful, dependent));
             assert_eq!(0, state);
             assert_eq!(1, plus_one);
             set_state(1);
 
-            let ((state, _), plus_one) = container.read((stateful, DependentCapsule));
+            let ((state, _), plus_one) = container.read((stateful, dependent));
             assert_eq!(1, state);
             assert_eq!(2, plus_one);
         }
 
         fn stateful(
-            register: SideEffectRegistrar<'_>,
+            _: CapsuleReader,
+            register: SideEffectRegistrar,
         ) -> (u8, std::sync::Arc<dyn Fn(u8) + Send + Sync>) {
             let (state, set_state) = register(side_effects::StateEffect::new(0));
             (*state, set_state)
         }
 
-        struct DependentCapsule;
-        impl Capsule for DependentCapsule {
-            type Data = u8;
-            fn build(
-                &self,
-                reader: &mut impl CapsuleReader<Data = Self::Data>,
-                _: SideEffectRegistrar<'_>,
-            ) -> Self::Data {
-                reader.read(stateful).0 + 1
-            }
+        fn dependent(mut reader: CapsuleReader, _: SideEffectRegistrar) -> u8 {
+            reader.read(stateful).0 + 1
         }
     }
 
@@ -857,56 +808,47 @@ mod tests {
     // C, D, E, G, H are super pure. A, B, F are not.
     #[test]
     fn complex_dependency_graph() {
-        use crate::{
-            self as rearch, capsule, side_effects, CapsuleReader, Container, SideEffectRegistrar,
-        };
+        use crate::{side_effects, CapsuleReader, Container, SideEffectRegistrar};
 
         fn stateful_a(
-            register: SideEffectRegistrar<'_>,
+            _: CapsuleReader,
+            register: SideEffectRegistrar,
         ) -> (u8, std::sync::Arc<dyn Fn(u8) + Send + Sync>) {
             let (state, set_state) = register(side_effects::StateEffect::new(0));
             (*state, set_state)
         }
 
-        #[capsule]
-        fn a(reader: &mut impl CapsuleReader) -> u8 {
+        fn a(mut reader: CapsuleReader, _: SideEffectRegistrar) -> u8 {
             reader.read(stateful_a).0
         }
 
-        #[capsule]
-        fn b(reader: &mut impl CapsuleReader, register: SideEffectRegistrar<'_>) -> u8 {
+        fn b(mut reader: CapsuleReader, register: SideEffectRegistrar) -> u8 {
             register(());
-            reader.read(ACapsule) + 1
+            reader.read(a) + 1
         }
 
-        #[capsule]
-        fn c(reader: &mut impl CapsuleReader) -> u8 {
-            reader.read(BCapsule) + reader.read(FCapsule)
+        fn c(mut reader: CapsuleReader, _: SideEffectRegistrar) -> u8 {
+            reader.read(b) + reader.read(f)
         }
 
-        #[capsule]
-        fn d(reader: &mut impl CapsuleReader) -> u8 {
-            reader.read(CCapsule)
+        fn d(mut reader: CapsuleReader, _: SideEffectRegistrar) -> u8 {
+            reader.read(c)
         }
 
-        #[capsule]
-        fn e(reader: &mut impl CapsuleReader) -> u8 {
-            reader.read(ACapsule) + reader.read(HCapsule)
+        fn e(mut reader: CapsuleReader, _: SideEffectRegistrar) -> u8 {
+            reader.read(a) + reader.read(h)
         }
 
-        #[capsule]
-        fn f(reader: &mut impl CapsuleReader, register: SideEffectRegistrar<'_>) -> u8 {
+        fn f(mut reader: CapsuleReader, register: SideEffectRegistrar) -> u8 {
             register(());
-            reader.read(ECapsule)
+            reader.read(e)
         }
 
-        #[capsule]
-        fn g(reader: &mut impl CapsuleReader) -> u8 {
-            reader.read(CCapsule) + reader.read(FCapsule)
+        fn g(mut reader: CapsuleReader, _: SideEffectRegistrar) -> u8 {
+            reader.read(c) + reader.read(f)
         }
 
-        #[capsule]
-        const fn h() -> u8 {
+        fn h(_: CapsuleReader, _: SideEffectRegistrar) -> u8 {
             1
         }
 
@@ -916,29 +858,29 @@ mod tests {
         container.with_read_txn(|txn| {
             read_txn_counter += 1;
             assert!(txn.try_read(stateful_a).is_none());
-            assert_eq!(txn.try_read(ACapsule), None);
-            assert_eq!(txn.try_read(BCapsule), None);
-            assert_eq!(txn.try_read(CCapsule), None);
-            assert_eq!(txn.try_read(DCapsule), None);
-            assert_eq!(txn.try_read(ECapsule), None);
-            assert_eq!(txn.try_read(FCapsule), None);
-            assert_eq!(txn.try_read(GCapsule), None);
-            assert_eq!(txn.try_read(HCapsule), None);
+            assert_eq!(txn.try_read(a), None);
+            assert_eq!(txn.try_read(b), None);
+            assert_eq!(txn.try_read(c), None);
+            assert_eq!(txn.try_read(d), None);
+            assert_eq!(txn.try_read(e), None);
+            assert_eq!(txn.try_read(f), None);
+            assert_eq!(txn.try_read(g), None);
+            assert_eq!(txn.try_read(h), None);
         });
 
-        container.read((DCapsule, GCapsule));
+        container.read((d, g));
 
         container.with_read_txn(|txn| {
             read_txn_counter += 1;
             assert!(txn.try_read(stateful_a).is_some());
-            assert_eq!(txn.try_read(ACapsule).unwrap(), 0);
-            assert_eq!(txn.try_read(BCapsule).unwrap(), 1);
-            assert_eq!(txn.try_read(CCapsule).unwrap(), 2);
-            assert_eq!(txn.try_read(DCapsule).unwrap(), 2);
-            assert_eq!(txn.try_read(ECapsule).unwrap(), 1);
-            assert_eq!(txn.try_read(FCapsule).unwrap(), 1);
-            assert_eq!(txn.try_read(GCapsule).unwrap(), 3);
-            assert_eq!(txn.try_read(HCapsule).unwrap(), 1);
+            assert_eq!(txn.try_read(a).unwrap(), 0);
+            assert_eq!(txn.try_read(b).unwrap(), 1);
+            assert_eq!(txn.try_read(c).unwrap(), 2);
+            assert_eq!(txn.try_read(d).unwrap(), 2);
+            assert_eq!(txn.try_read(e).unwrap(), 1);
+            assert_eq!(txn.try_read(f).unwrap(), 1);
+            assert_eq!(txn.try_read(g).unwrap(), 3);
+            assert_eq!(txn.try_read(h).unwrap(), 1);
         });
 
         container.read(stateful_a).1(10);
@@ -946,14 +888,14 @@ mod tests {
         container.with_read_txn(|txn| {
             read_txn_counter += 1;
             assert!(txn.try_read(stateful_a).is_some());
-            assert_eq!(txn.try_read(ACapsule).unwrap(), 10);
-            assert_eq!(txn.try_read(BCapsule).unwrap(), 11);
-            assert_eq!(txn.try_read(CCapsule), None);
-            assert_eq!(txn.try_read(DCapsule), None);
-            assert_eq!(txn.try_read(ECapsule).unwrap(), 11);
-            assert_eq!(txn.try_read(FCapsule).unwrap(), 11);
-            assert_eq!(txn.try_read(GCapsule), None);
-            assert_eq!(txn.try_read(HCapsule).unwrap(), 1);
+            assert_eq!(txn.try_read(a).unwrap(), 10);
+            assert_eq!(txn.try_read(b).unwrap(), 11);
+            assert_eq!(txn.try_read(c), None);
+            assert_eq!(txn.try_read(d), None);
+            assert_eq!(txn.try_read(e).unwrap(), 11);
+            assert_eq!(txn.try_read(f).unwrap(), 11);
+            assert_eq!(txn.try_read(g), None);
+            assert_eq!(txn.try_read(h).unwrap(), 1);
         });
 
         assert_eq!(read_txn_counter, 3);

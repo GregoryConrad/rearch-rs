@@ -175,16 +175,14 @@ impl<F> SideEffect for RunOnChangeEffect<F>
 where
     F: FnOnce() + Send + 'static,
 {
-    type Api<'a> = Box<dyn Fn(F) + 'a>;
+    type Api<'a> = Box<dyn FnMut(F) + 'a>;
 
     fn api(&mut self, _: Rebuilder<Self>) -> Self::Api<'_> {
-        let cell = std::cell::RefCell::new(self); // so Api doesn't need to be FnMut
         Box::new(move |new_effect| {
-            let mut effect = cell.borrow_mut();
-            if let Some(callback) = std::mem::take(&mut effect.0) {
+            if let Some(callback) = std::mem::take(&mut self.0) {
                 callback();
             }
-            effect.0 = Some(new_effect);
+            self.0 = Some(new_effect);
         })
     }
 }

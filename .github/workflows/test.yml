@@ -27,7 +27,7 @@ jobs:
       - name: Check format
         run: cargo +nightly fmt --all --check
       - name: Minimal-feature code analysis
-        run: cargo +nightly clippy --workspace -- -D warnings
+        run: cargo +nightly clippy --workspace --no-default-features -- -D warnings
       - name: Full-feature code analysis
         run: cargo +nightly clippy --workspace --all-targets --all-features -- -D warnings
       - name: Run tests
