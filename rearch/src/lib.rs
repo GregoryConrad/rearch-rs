@@ -35,6 +35,9 @@ pub use rearch_macros::capsule;
 
 pub mod side_effects;
 
+mod gc;
+pub use gc::*;
+
 /// Capsules are blueprints for creating some immutable data
 /// and do not actually contain any data themselves.
 /// See the README for more.
@@ -72,7 +75,7 @@ where
     }
 }
 
-/// Represents a valid type of any capsule. Capsules must be `Clone + Send + Sync + 'static`.
+/// Represents a Capsule's data type; Capsules' data must be `Clone + Send + Sync + 'static`.
 pub trait CapsuleType: Any + DynClone + Send + Sync + 'static {}
 impl<T: Clone + Send + Sync + 'static> CapsuleType for T {}
 dyn_clone::clone_trait_object!(CapsuleType);
@@ -94,7 +97,10 @@ pub trait SideEffect: Send + 'static {
     where
         Self: 'a;
 
-    // TODO inner type and function to make rebuild easier? Either that (which I prefer)
+    // TODO Can we change side effects to be like:
+    // register(effect1(1234), effect2(abc))
+    // where effect1/2 take in own args, then return fn that takes in registrar to produce API
+    // OR, inner type and function to make rebuild easier? Either that (which I prefer)
     // or we should provide a proc macro that generates a `impl SideEffect` from the following:
     //
     // #[side_effect(SyncPersistEffect<Read, Write, R, T>, (effect.data))]
@@ -341,64 +347,6 @@ impl ContainerWriteTxn<'_> {
         self.try_read_raw::<C>()
             .expect("Data should be present due to checking/building capsule above")
     }
-}
-impl ContainerWriteTxn<'_> {
-    // TODO maybe we can expose a level-based Api to do this in just one method or two methods
-    /*
-    /// Attempts to garbage collect the given Capsule and its dependent subgraph, disposing
-    /// the supplied Capsule and its dependent subgraph (and then returning `true`) only when
-    /// the supplied Capsule and its dependent subgraph consist only of super pure capsules.
-    // TODO what about when node isnt in container? probs should return custom enum
-    pub fn try_garbage_collect_super_pure<C: Capsule>(&mut self) -> bool {
-        let id = TypeId::of::<C>();
-        let build_order = self.create_build_order_stack(id);
-
-        let is_all_super_pure = build_order
-            .iter()
-            .all(|id| self.node_or_panic(*id).is_super_pure());
-
-        if is_all_super_pure {
-            for id in build_order {
-                self.dispose_single_node(id);
-            }
-        }
-
-        is_all_super_pure
-    }
-    */
-
-    /*
-    /// Attempts to garbage collect the given Capsule and its dependent subgraph, disposing
-    /// the supplied Capsule and its dependent subgraph (and then returning `true`) only when:
-    /// - The dependent subgraph consists only of super pure capsules, or
-    /// - `dispose_impure_dependents` is set to true
-    ///
-    /// If you are not expecting the supplied Capsule to have dependents,
-    /// _set `dispose_impure_dependents` to false_, as setting it to true is *highly* unsafe.
-    /// In addition, in this case, it is also recommended to `assert!` the return value of this
-    /// function is true to ensure you didn't accidentally create other Capsule(s) which depend
-    /// on the supplied Capsule.
-    ///
-    /// # Safety
-    /// This is inherently unsafe because it violates the contract that capsules which
-    /// are not super pure will not be disposed, at least prior to their Container's disposal.
-    /// While invoking this method will never result in undefined behavior,
-    /// it can *easily* result in logic bugs, thus the unsafe marking.
-    /// This method is only exposed for the *very* few and specific use cases in which there
-    /// is a need to deeply integrate with rearch in order to prevent leaks,
-    /// such as when developing a UI framework and you need to listen to capsule updates.
-    // TODO consider splitting this into different methods, _single, _sp_deps, _ip_deps
-    pub unsafe fn force_garbage_collect<C: Capsule>(
-        dispose_impure_dependents: bool,
-    ) -> bool {
-        // handles these cases:
-        // - super pure, with impure dependents
-        // - impure, no dependents
-        // - impure, with super pure dependents
-        // - impure, with impure dependents
-        todo!()
-    }
-    */
 }
 impl ContainerWriteTxn<'_> {
     /// Tries a capsule read, but doesn't require an instance of the capsule itself
