@@ -6,30 +6,30 @@ fn count(_: CapsuleReader, _: SideEffectRegistrar) -> i32 {
     0
 }
 
-fn count_plus_one(mut reader: CapsuleReader, _: SideEffectRegistrar) -> i32 {
-    reader.read(count) + 1
+fn count_plus_one(mut get: CapsuleReader, _: SideEffectRegistrar) -> i32 {
+    get(count) + 1
 }
 
-fn crazy(mut reader: CapsuleReader, _: SideEffectRegistrar) -> &'static str {
-    reader.read(count);
-    reader.read(count_plus_one);
+fn crazy(mut get: CapsuleReader, _: SideEffectRegistrar) -> &'static str {
+    get(count);
+    get(count_plus_one);
     "crazy!"
 }
 
 fn big_string_factory(
-    mut reader: CapsuleReader,
+    mut get: CapsuleReader,
     _: SideEffectRegistrar,
 ) -> Arc<dyn Fn(&str) -> String + Send + Sync> {
-    let count = reader.read(count);
-    let count_plus_one = reader.read(count_plus_one);
-    let crazy = reader.read(crazy);
+    let count = get(count);
+    let count_plus_one = get(count_plus_one);
+    let crazy = get(crazy);
     Arc::new(move |other| {
         format!("param: {other}, count: {count}, count_plus_one: {count_plus_one}, crazy: {crazy}")
     })
 }
 
-fn uses_factory(mut reader: CapsuleReader, _: SideEffectRegistrar) -> String {
-    reader.read(big_string_factory)("argument supplied to factory")
+fn uses_factory(mut get: CapsuleReader, _: SideEffectRegistrar) -> String {
+    get(big_string_factory)("argument supplied to factory")
 }
 
 fn stateful(

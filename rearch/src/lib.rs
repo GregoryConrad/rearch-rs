@@ -611,13 +611,24 @@ impl CapsuleManager {
 }
 
 /// Allows you to read the current data of capsules based on the given state of the container.
-// TODO FnOnce and FnMut impl for var args
 pub struct CapsuleReader<'scope, 'total> {
     id: TypeId,
     txn: &'scope mut ContainerWriteTxn<'total>,
     // TODO mock utility, like MockCapsuleReaderBuilder::new().set(capsule, value).set(...).build()
     // #[cfg(feature = "capsule-reader-mock")]
     // mock: Option<CapsuleMocks>,
+}
+
+impl<A: Capsule> FnOnce<(A,)> for CapsuleReader<'_, '_> {
+    type Output = A::Data;
+    extern "rust-call" fn call_once(mut self, args: (A,)) -> Self::Output {
+        self.call_mut(args)
+    }
+}
+impl<A: Capsule> FnMut<(A,)> for CapsuleReader<'_, '_> {
+    extern "rust-call" fn call_mut(&mut self, args: (A,)) -> Self::Output {
+        self.read(args.0)
+    }
 }
 
 impl CapsuleReader<'_, '_> {
@@ -755,8 +766,8 @@ mod tests {
         fn count(_: CapsuleReader, _: SideEffectRegistrar) -> u8 {
             0
         }
-        fn count_plus_one(mut reader: CapsuleReader, _: SideEffectRegistrar) -> u8 {
-            reader.read(count) + 1
+        fn count_plus_one(mut get: CapsuleReader, _: SideEffectRegistrar) -> u8 {
+            get(count) + 1
         }
 
         let container = Container::new();
@@ -819,8 +830,8 @@ mod tests {
             (*state, set_state)
         }
 
-        fn dependent(mut reader: CapsuleReader, _: SideEffectRegistrar) -> u8 {
-            reader.read(stateful).0 + 1
+        fn dependent(mut get: CapsuleReader, _: SideEffectRegistrar) -> u8 {
+            get(stateful).0 + 1
         }
     }
 
@@ -843,34 +854,34 @@ mod tests {
             (*state, set_state)
         }
 
-        fn a(mut reader: CapsuleReader, _: SideEffectRegistrar) -> u8 {
-            reader.read(stateful_a).0
+        fn a(mut get: CapsuleReader, _: SideEffectRegistrar) -> u8 {
+            get(stateful_a).0
         }
 
-        fn b(mut reader: CapsuleReader, register: SideEffectRegistrar) -> u8 {
+        fn b(mut get: CapsuleReader, register: SideEffectRegistrar) -> u8 {
             register(());
-            reader.read(a) + 1
+            get(a) + 1
         }
 
-        fn c(mut reader: CapsuleReader, _: SideEffectRegistrar) -> u8 {
-            reader.read(b) + reader.read(f)
+        fn c(mut get: CapsuleReader, _: SideEffectRegistrar) -> u8 {
+            get(b) + get(f)
         }
 
-        fn d(mut reader: CapsuleReader, _: SideEffectRegistrar) -> u8 {
-            reader.read(c)
+        fn d(mut get: CapsuleReader, _: SideEffectRegistrar) -> u8 {
+            get(c)
         }
 
-        fn e(mut reader: CapsuleReader, _: SideEffectRegistrar) -> u8 {
-            reader.read(a) + reader.read(h)
+        fn e(mut get: CapsuleReader, _: SideEffectRegistrar) -> u8 {
+            get(a) + get(h)
         }
 
-        fn f(mut reader: CapsuleReader, register: SideEffectRegistrar) -> u8 {
+        fn f(mut get: CapsuleReader, register: SideEffectRegistrar) -> u8 {
             register(());
-            reader.read(e)
+            get(e)
         }
 
-        fn g(mut reader: CapsuleReader, _: SideEffectRegistrar) -> u8 {
-            reader.read(c) + reader.read(f)
+        fn g(mut get: CapsuleReader, _: SideEffectRegistrar) -> u8 {
+            get(c) + get(f)
         }
 
         fn h(_: CapsuleReader, _: SideEffectRegistrar) -> u8 {
