@@ -711,7 +711,7 @@ generate_side_effect_registrar_fn_impl!(A, B, C, D, E, F, G);
 generate_side_effect_registrar_fn_impl!(A, B, C, D, E, F, G, H);
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
+#[allow(clippy::unwrap_used, clippy::missing_const_for_fn)]
 mod tests {
 
     /// Check for Container: Send + Sync
