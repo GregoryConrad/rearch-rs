@@ -2,42 +2,12 @@ use std::{cell::OnceCell, marker::PhantomData, sync::Arc};
 
 use crate::{SideEffect, SideEffectRebuilder};
 
-type Rebuilder<T> = Box<dyn SideEffectRebuilder<T>>;
-
 // Note: We use Arc/Box<dyn Fn()> extensively throughout the SideEffect::Apis in order to:
 // - Improve users' testability (it is difficult to mock static dispatch from SideEffect::Apis)
 // - Improve performance (somehow Arc performed slightly better than static dispatch on benchmarks)
 // - Avoid yet another nightly requirement (feature gate `impl_trait_in_assoc_type`)
 
-macro_rules! generate_tuple_side_effect_impl {
-    ($($types:ident),*) => {
-        impl<$($types: SideEffect),*> SideEffect for ($($types),*) {
-            type Api<'a> = ($($types::Api<'a>),*);
-
-            #[allow(unused_variables, clippy::unused_unit)]
-            fn api(&mut self, rebuild: Rebuilder<Self>) -> Self::Api<'_> {
-                ($(
-                    self.${index()}.api({
-                        let rebuild = rebuild.clone();
-                        let rebuild: Rebuilder<$types> = Box::new(move |mutation| rebuild(
-                            Box::new(move |store| mutation(&mut store.${index()}))
-                        ));
-                        rebuild
-                    })
-                ),*)
-            }
-        }
-    };
-}
-
-generate_tuple_side_effect_impl!(); // () is the no-op side effect that denotes super pure capsules
-generate_tuple_side_effect_impl!(A, B);
-generate_tuple_side_effect_impl!(A, B, C);
-generate_tuple_side_effect_impl!(A, B, C, D);
-generate_tuple_side_effect_impl!(A, B, C, D, E);
-generate_tuple_side_effect_impl!(A, B, C, D, E, F);
-generate_tuple_side_effect_impl!(A, B, C, D, E, F, G);
-generate_tuple_side_effect_impl!(A, B, C, D, E, F, G, H);
+type Rebuilder<T> = Box<dyn SideEffectRebuilder<T>>;
 
 pub struct StateEffect<T>(T);
 impl<T> StateEffect<T> {
@@ -256,7 +226,7 @@ where
     }
 }
 
-// TODO logging side effect for the logging feature, and convert below too
+// TODO convert below side effects too
 /*
 #[cfg(feature = "tokio-side-effects")]
 fn future_from_fn<R, Future>(

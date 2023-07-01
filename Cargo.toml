@@ -1,5 +1,6 @@
 [workspace]
 members = ["rearch-macros", "rearch"]
+resolver = "2"
 
 [workspace.package]
 version = "0.0.0"
