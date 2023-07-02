@@ -43,12 +43,60 @@ pub use side_effect_registrar::*;
 mod txn;
 pub use txn::*;
 
-mod gc;
-pub use gc::*;
+// TODO convert side effects to this format
+/*
+fn state<T>(default: T) -> SideEffect<Api = (u8, Arc)> {
+    move |register| {
+        let (data, rebuilder) = register.state(default);
+        (data, rebuilder)
+    }
+}
 
+fn lazy_state<T, F: FnOnce() -> T>(init: F) -> SideEffect {
+    move |register| {
+        let (data, rebuilder) = register.state(LazyCell::new(init));
+        (data.get_mut(), rebuilder)
+    }
+}
+
+fn sync_persist<Read, Write, R, T>(read: Read, write: Write) {
+    move |register| {
+        let ((state, set_state), write) = register(lazy_state(read), value(Arc::new(write)));
+
+        let write = Arc::clone(write);
+        let persist = move |new_data| {
+            let persist_result = write(new_data);
+            set_state(persist_result);
+        };
+
+        (state, Arc::new(persist))
+    }
+}
+*/
+// TODO attempt to see if we can rewrite SideEffectRebuilder without Box<dyn> with new approach
+//   (but keep the Box<dyn FnOnce(...)> inner part the same)
+// TODO these next two require generic closures, perhaps ask about them again.
+//   https://github.com/rust-lang/rfcs/pull/1650
+//   https://github.com/rust-lang/rust/issues/97362
+//   TODO side effect registrar can also be a type alias to Box<dyn Fn(SideEffect)>,
+//     and backwards compat can be maintained completely if we provide mock-creating API
+//     (because tuple side effect will always be treated as one)
+//     because ideally, registrar should be var-args.
+//     benchmark before and after so we don't make a bad time trade off
+//   TODO Consider turning CapsuleReader into type alias for Box<dyn Fn()>
+//     for easy mocking and also easy read
+//     Either that or do the mocking feature thing
+//     benchmark before and after so we don't make a bad time trade off
+// TODO capsule macro
+// TODO side effect macro to remove the `move |register| {}` boilerplate
 // TODO aggressive garbage collection mode
 //   (delete all created super pure capsules that aren't needed at end of a requested build)
-// TODO capsule macro
+// TODO listener function instead of exposed garbage collection.
+//   container.listen(|get| do_something(get(some_capsule)))
+//   returns a ListenerKeepAlive that removes listener once dropped
+//   internally implemented as an "impure" capsule that is dropped when keep alive drops
+//   what about the listener's dependencies? should they be trimmed if possible?
+//   maybe go off container's aggressiveness setting
 
 /// Capsules are blueprints for creating some immutable data
 /// and do not actually contain any data themselves.
@@ -111,11 +159,6 @@ pub trait SideEffect: Send + 'static {
     where
         Self: 'a;
 
-    // TODO Can we change side effects to be like:
-    // register(effect1(1234), effect2(abc))
-    // where effect1/2 take in own args, then return fn that takes in registrar to produce API
-    // OR, inner type and function to make rebuild easier?
-
     /// Construct this side effect's build api, given:
     /// - A mutable reference to the current state of this side effect (&mut self)
     /// - A mechanism to trigger rebuilds that can also update the state of this side effect
@@ -153,9 +196,6 @@ generate_tuple_side_effect_impl!(A, B, C, D, E, F);
 generate_tuple_side_effect_impl!(A, B, C, D, E, F, G);
 generate_tuple_side_effect_impl!(A, B, C, D, E, F, G, H);
 
-// Using a trait object here to prevent a sea of complicated generics everywhere
-// TODO maybe try making this static dispatch again? Box<dyn ...> is gross.
-// (Keep inner as Box<dyn FnOnce(&mut S)>, but outer should be impl)
 pub trait SideEffectRebuilder<S>:
     Fn(Box<dyn FnOnce(&mut S)>) + Send + Sync + DynClone + 'static
 {
@@ -221,7 +261,6 @@ impl Container {
     /// Internally, tries to read all supplied capsules with a read txn first (cheap),
     /// but if that fails (i.e., capsules' data not present in the container),
     /// spins up a write txn and initializes all needed capsules (which blocks).
-    // TODO add our fun lil var args impl hack to Container to make it easier to read capsules
     pub fn read<CL: CapsuleList>(&self, capsules: CL) -> CL::Data {
         capsules.read(self)
     }
@@ -243,7 +282,7 @@ macro_rules! generate_capsule_list_impl {
                 fn read(self, container: &Container) -> Self::Data {
                     let ($([<i $C>]),*) = self;
                     if let ($(Some([<i $C>])),*) =
-                        container.with_read_txn(|txn| ($(txn.try_read_raw::<$C>()),*)) {
+                        container.with_read_txn(|txn| ($(txn.try_read(&[<i $C>])),*)) {
                         ($([<i $C>]),*)
                     } else {
                         container.with_write_txn(|txn| ($(txn.read_or_init([<i $C>])),*))
@@ -433,7 +472,7 @@ mod tests {
         let container = Container::new();
         assert_eq!(
             (None, None),
-            container.with_read_txn(|txn| (txn.try_read(count), txn.try_read(count_plus_one)))
+            container.with_read_txn(|txn| (txn.try_read(&count), txn.try_read(&count_plus_one)))
         );
         assert_eq!(
             1,
@@ -441,7 +480,7 @@ mod tests {
         );
         assert_eq!(
             0,
-            container.with_read_txn(|txn| txn.try_read(count).unwrap())
+            container.with_read_txn(|txn| txn.try_read(&count).unwrap())
         );
 
         let container = Container::new();
@@ -551,45 +590,45 @@ mod tests {
 
         container.with_read_txn(|txn| {
             read_txn_counter += 1;
-            assert!(txn.try_read(stateful_a).is_none());
-            assert_eq!(txn.try_read(a), None);
-            assert_eq!(txn.try_read(b), None);
-            assert_eq!(txn.try_read(c), None);
-            assert_eq!(txn.try_read(d), None);
-            assert_eq!(txn.try_read(e), None);
-            assert_eq!(txn.try_read(f), None);
-            assert_eq!(txn.try_read(g), None);
-            assert_eq!(txn.try_read(h), None);
+            assert!(txn.try_read(&stateful_a).is_none());
+            assert_eq!(txn.try_read(&a), None);
+            assert_eq!(txn.try_read(&b), None);
+            assert_eq!(txn.try_read(&c), None);
+            assert_eq!(txn.try_read(&d), None);
+            assert_eq!(txn.try_read(&e), None);
+            assert_eq!(txn.try_read(&f), None);
+            assert_eq!(txn.try_read(&g), None);
+            assert_eq!(txn.try_read(&h), None);
         });
 
         container.read((d, g));
 
         container.with_read_txn(|txn| {
             read_txn_counter += 1;
-            assert!(txn.try_read(stateful_a).is_some());
-            assert_eq!(txn.try_read(a).unwrap(), 0);
-            assert_eq!(txn.try_read(b).unwrap(), 1);
-            assert_eq!(txn.try_read(c).unwrap(), 2);
-            assert_eq!(txn.try_read(d).unwrap(), 2);
-            assert_eq!(txn.try_read(e).unwrap(), 1);
-            assert_eq!(txn.try_read(f).unwrap(), 1);
-            assert_eq!(txn.try_read(g).unwrap(), 3);
-            assert_eq!(txn.try_read(h).unwrap(), 1);
+            assert!(txn.try_read(&stateful_a).is_some());
+            assert_eq!(txn.try_read(&a).unwrap(), 0);
+            assert_eq!(txn.try_read(&b).unwrap(), 1);
+            assert_eq!(txn.try_read(&c).unwrap(), 2);
+            assert_eq!(txn.try_read(&d).unwrap(), 2);
+            assert_eq!(txn.try_read(&e).unwrap(), 1);
+            assert_eq!(txn.try_read(&f).unwrap(), 1);
+            assert_eq!(txn.try_read(&g).unwrap(), 3);
+            assert_eq!(txn.try_read(&h).unwrap(), 1);
         });
 
         container.read(stateful_a).1(10);
 
         container.with_read_txn(|txn| {
             read_txn_counter += 1;
-            assert!(txn.try_read(stateful_a).is_some());
-            assert_eq!(txn.try_read(a).unwrap(), 10);
-            assert_eq!(txn.try_read(b).unwrap(), 11);
-            assert_eq!(txn.try_read(c), None);
-            assert_eq!(txn.try_read(d), None);
-            assert_eq!(txn.try_read(e).unwrap(), 11);
-            assert_eq!(txn.try_read(f).unwrap(), 11);
-            assert_eq!(txn.try_read(g), None);
-            assert_eq!(txn.try_read(h).unwrap(), 1);
+            assert!(txn.try_read(&stateful_a).is_some());
+            assert_eq!(txn.try_read(&a).unwrap(), 10);
+            assert_eq!(txn.try_read(&b).unwrap(), 11);
+            assert_eq!(txn.try_read(&c), None);
+            assert_eq!(txn.try_read(&d), None);
+            assert_eq!(txn.try_read(&e).unwrap(), 11);
+            assert_eq!(txn.try_read(&f).unwrap(), 11);
+            assert_eq!(txn.try_read(&g), None);
+            assert_eq!(txn.try_read(&h).unwrap(), 1);
         });
 
         assert_eq!(read_txn_counter, 3);
