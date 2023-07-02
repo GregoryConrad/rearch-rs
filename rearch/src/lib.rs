@@ -75,18 +75,6 @@ fn sync_persist<Read, Write, R, T>(read: Read, write: Write) {
 */
 // TODO attempt to see if we can rewrite SideEffectRebuilder without Box<dyn> with new approach
 //   (but keep the Box<dyn FnOnce(...)> inner part the same)
-// TODO these next two require generic closures, perhaps ask about them again.
-//   https://github.com/rust-lang/rfcs/pull/1650
-//   https://github.com/rust-lang/rust/issues/97362
-//   TODO side effect registrar can also be a type alias to Box<dyn Fn(SideEffect)>,
-//     and backwards compat can be maintained completely if we provide mock-creating API
-//     (because tuple side effect will always be treated as one)
-//     because ideally, registrar should be var-args.
-//     benchmark before and after so we don't make a bad time trade off
-//   TODO Consider turning CapsuleReader into type alias for Box<dyn Fn()>
-//     for easy mocking and also easy read
-//     Either that or do the mocking feature thing
-//     benchmark before and after so we don't make a bad time trade off
 // TODO capsule macro
 // TODO side effect macro to remove the `move |register| {}` boilerplate
 // TODO aggressive garbage collection mode

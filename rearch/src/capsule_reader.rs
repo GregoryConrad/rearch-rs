@@ -3,12 +3,11 @@ use std::any::TypeId;
 use crate::{Capsule, ContainerWriteTxn};
 
 /// Allows you to read the current data of capsules based on the given state of the container txn.
+// TODO switch this to an Enum of Actual/Mock and don't need mock feature
+// TODO mock utility, like MockCapsuleReaderBuilder::new().set(capsule, value).set(...).build()
 pub struct CapsuleReader<'scope, 'total> {
     id: TypeId,
     txn: &'scope mut ContainerWriteTxn<'total>,
-    // TODO mock utility, like MockCapsuleReaderBuilder::new().set(capsule, value).set(...).build()
-    // #[cfg(feature = "capsule-reader-mock")]
-    // mock: Option<CapsuleMocks>,
 }
 
 impl<'scope, 'total> CapsuleReader<'scope, 'total> {
