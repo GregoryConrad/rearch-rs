@@ -95,11 +95,13 @@ impl MockCapsuleReaderBuilder {
         Self::default()
     }
 
+    #[must_use]
     pub fn set<C: Capsule>(mut self, _capsule: &C, data: C::Data) -> Self {
         self.0.insert(TypeId::of::<C>(), Box::new(data));
         self
     }
 
+    #[must_use]
     pub fn build(self) -> CapsuleReader<'static, 'static> {
         CapsuleReader::Mock { mocks: self.0 }
     }
