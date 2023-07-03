@@ -73,8 +73,7 @@ fn sync_persist<Read, Write, R, T>(read: Read, write: Write) {
     }
 }
 */
-// TODO attempt to see if we can rewrite SideEffectRebuilder without Box<dyn> with new approach
-//   (but keep the Box<dyn FnOnce(...)> inner part the same)
+// TODO see if we can change SideEffectRebuilder to not take in generic argument (instead use Any)
 // TODO capsule macro
 // TODO side effect macro to remove the `move |register| {}` boilerplate
 // TODO aggressive garbage collection mode
@@ -206,7 +205,7 @@ impl Container {
     /// Use `read()` to populate and read some capsules!
     #[must_use]
     pub fn new() -> Self {
-        Self(Arc::new(ContainerStore::default()))
+        Self::default()
     }
 
     /// Runs the supplied callback with a `ContainerReadTxn` that allows you to read
