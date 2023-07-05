@@ -2,6 +2,47 @@ use proc_macro::TokenStream;
 use quote::{format_ident, quote};
 use syn::parse_macro_input;
 
+/// Macro for handling some implementation boilerplate; do not use.
+#[proc_macro]
+pub fn generate_tuple_side_effect_impl(input: TokenStream) -> TokenStream {
+    let types = input
+        .into_iter()
+        .map(|token| match token {
+            proc_macro::TokenTree::Ident(ident) => ident,
+            _ => panic!("Expected identifier as argument"),
+        })
+        .map(|token| token.to_string())
+        .map(|ident| format_ident!("{ident}"))
+        .collect::<Vec<_>>();
+    let once_cell_inits = (0..types.len()).map(|_| quote! { OnceCell::new() });
+    let individual_apis = (0..types.len()).map(|i| syn::Index::from(i)).map(|i| {
+        quote! {
+            self.#i.build(SideEffectRegistrar::new(&mut all_states.#i, {
+                let rebuild_all = rebuild_all.clone();
+                Box::new(move |mutation: Box<dyn FnOnce(&mut Box<dyn Any + Send>)>| {
+                    rebuild_all(Box::new(move |all_states| {
+                        mutation(all_states.#i.get_mut().expect(EFFECT_FAILED_CAST_MSG));
+                    }));
+                })
+            }))
+        }
+    });
+    let effect_impl = quote! {
+        impl<'a, #(#types: SideEffect<'a>),*> SideEffect<'a> for (#(#types),*) {
+            type Api = (#(#types::Api),*);
+
+            #[allow(clippy::unused_unit)]
+            fn build(self, registrar: SideEffectRegistrar<'a>) -> Self::Api {
+                let (all_states, rebuild_all) = registrar.raw((
+                    #(#once_cell_inits),*
+                ));
+                (#(#individual_apis),*)
+            }
+        }
+    };
+    effect_impl.into()
+}
+
 #[proc_macro_attribute]
 pub fn capsule(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let input = parse_macro_input!(item as syn::ItemFn);

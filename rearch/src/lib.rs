@@ -12,12 +12,7 @@
     clippy::unwrap_used
 )]
 #![feature(trait_upcasting)]
-// TODO attempt to rewrite with paste::paste! to avoid needing this nightly feature
-// (maybe just comment the nightly version out until this has stabilized)
-#![feature(macro_metavar_expr)]
-// TODO make these two opt-in via a temporary "better-api" feature that:
-// - Requires nightly
-// - Deprecates the (temporary) boring functions that are exposed for non-nightly use
+// TODO make these two opt-in via a temporary "better-api" feature that requires nightly
 #![feature(unboxed_closures)]
 #![feature(fn_traits)]
 
@@ -29,7 +24,6 @@ use std::{
     sync::{Arc, Mutex, Weak},
 };
 
-#[cfg(feature = "macros")]
 pub use rearch_macros::capsule;
 
 pub mod side_effects;
@@ -43,37 +37,6 @@ pub use side_effect_registrar::*;
 mod txn;
 pub use txn::*;
 
-// TODO convert side effects to this format
-/*
-fn state<T>(default: T) -> SideEffect<Api = (u8, Arc)> {
-    move |register| {
-        let (data, rebuilder) = register.state(default);
-        (data, rebuilder)
-    }
-}
-
-fn lazy_state<T, F: FnOnce() -> T>(init: F) -> SideEffect {
-    move |register| {
-        let (data, rebuilder) = register.state(LazyCell::new(init));
-        (data.get_mut(), rebuilder)
-    }
-}
-
-fn sync_persist<Read, Write, R, T>(read: Read, write: Write) {
-    move |register| {
-        let ((state, set_state), write) = register(lazy_state(read), value(Arc::new(write)));
-
-        let write = Arc::clone(write);
-        let persist = move |new_data| {
-            let persist_result = write(new_data);
-            set_state(persist_result);
-        };
-
-        (state, Arc::new(persist))
-    }
-}
-*/
-// TODO see if we can change SideEffectRebuilder to not take in generic argument (instead use Any)
 // TODO capsule macro
 // TODO side effect macro to remove the `move |register| {}` boilerplate
 // TODO aggressive garbage collection mode
@@ -89,10 +52,12 @@ fn sync_persist<Read, Write, R, T>(read: Read, write: Write) {
 /// and do not actually contain any data themselves.
 /// See the README for more.
 ///
-/// Note: *Do not manually implement this trait yourself!*
-/// It is an internal implementation detail that may be changed or removed in the future.
+/// *DO NOT MANUALLY IMPLEMENT THIS TRAIT YOURSELF!*
+/// It is an internal implementation detail that will likely be changed or removed in the future.
 // - `Send` is required because `CapsuleManager` needs to store a copy of the capsule
 // - `'static` is required to store a copy of the capsule, and for TypeId::of()
+// When trait aliases and associated type bounds are stable, this should be:
+//   `pub trait Capsule = Fn<(CapsuleReader, SideEffectRegistrar), Output: CapsuleData>;`
 pub trait Capsule: Send + 'static {
     /// The type of data associated with this capsule.
     /// Capsule types must be `Clone + Send + Sync + 'static`.
@@ -110,7 +75,6 @@ pub trait Capsule: Send + 'static {
     /// Doing so will result in a deadlock.
     fn build(&self, reader: CapsuleReader, effect: SideEffectRegistrar) -> Self::Data;
 }
-
 impl<T, F> Capsule for F
 where
     T: CapsuleData,
@@ -133,8 +97,10 @@ dyn_clone::clone_trait_object!(CapsuleData);
 /// The key observation about side effects is that they form a tree, where each side effect:
 /// - Has its own private state (including composing other side effects together)
 /// - Presents some api to the build method, probably including a way to rebuild & update its state
-// SideEffect needs a lifetime so that `Api` can contain a lifetime as well (if it needs to)
-pub trait SideEffect: Send + 'static {
+///
+/// *DO NOT MANUALLY IMPLEMENT THIS TRAIT YOURSELF!*
+/// It is an internal implementation detail that could be changed or removed in the future.
+pub trait SideEffect<'a> {
     /// The type exposed in the capsule build function when this side effect is registered;
     /// in other words, this is the api exposed by the side effect.
     ///
@@ -142,56 +108,28 @@ pub trait SideEffect: Send + 'static {
     /// - Data and/or state in this side effect
     /// - Function callbacks (perhaps to trigger a rebuild and/or update the side effect state)
     /// - Anything else imaginable!
-    type Api<'a>
-    where
-        Self: 'a;
+    type Api;
 
-    /// Construct this side effect's build api, given:
-    /// - A mutable reference to the current state of this side effect (&mut self)
-    /// - A mechanism to trigger rebuilds that can also update the state of this side effect
-    fn api(&mut self, rebuild: Box<dyn SideEffectRebuilder<Self>>) -> Self::Api<'_>;
+    /// Construct this side effect's `Api` through the given `SideEffectRegistrar`
+    fn build(self, registrar: SideEffectRegistrar<'a>) -> Self::Api;
 }
-
-macro_rules! generate_tuple_side_effect_impl {
-    ($($types:ident),*) => {
-        impl<$($types: SideEffect),*> SideEffect for ($($types),*) {
-            type Api<'a> = ($($types::Api<'a>),*);
-
-            #[allow(unused_variables, clippy::unused_unit)]
-            fn api(&mut self, rebuild: Box<dyn SideEffectRebuilder<Self>>) -> Self::Api<'_> {
-                ($(
-                    self.${index()}.api({
-                        let rebuild = rebuild.clone();
-                        let rebuild: Box<dyn SideEffectRebuilder<$types>> =
-                            Box::new(move |mutation| rebuild(
-                                Box::new(move |store| mutation(&mut store.${index()}))
-                            ));
-                        rebuild
-                    })
-                ),*)
-            }
-        }
-    };
+impl<'a, T, F: FnOnce(SideEffectRegistrar<'a>) -> T> SideEffect<'a> for F {
+    type Api = T;
+    fn build(self, registrar: SideEffectRegistrar<'a>) -> Self::Api {
+        self(registrar)
+    }
 }
-
-generate_tuple_side_effect_impl!(); // () is the no-op side effect
-generate_tuple_side_effect_impl!(A, B);
-generate_tuple_side_effect_impl!(A, B, C);
-generate_tuple_side_effect_impl!(A, B, C, D);
-generate_tuple_side_effect_impl!(A, B, C, D, E);
-generate_tuple_side_effect_impl!(A, B, C, D, E, F);
-generate_tuple_side_effect_impl!(A, B, C, D, E, F, G);
-generate_tuple_side_effect_impl!(A, B, C, D, E, F, G, H);
-
-pub trait SideEffectRebuilder<S>:
-    Fn(Box<dyn FnOnce(&mut S)>) + Send + Sync + DynClone + 'static
-{
-}
-impl<S, F> SideEffectRebuilder<S> for F where
-    F: Fn(Box<dyn FnOnce(&mut S)>) + Send + Sync + Clone + 'static
-{
-}
-dyn_clone::clone_trait_object!(<S> SideEffectRebuilder<S>);
+const EFFECT_FAILED_CAST_MSG: &str =
+    "You cannot change the side effect(s) passed to SideEffectRegistrar::register()!";
+// These should be declarative macros, but they unfortunately would require macro_metavar_expr
+rearch_macros::generate_tuple_side_effect_impl!(); // () is the no-op side effect
+rearch_macros::generate_tuple_side_effect_impl!(A B);
+rearch_macros::generate_tuple_side_effect_impl!(A B C);
+rearch_macros::generate_tuple_side_effect_impl!(A B C D);
+rearch_macros::generate_tuple_side_effect_impl!(A B C D E);
+rearch_macros::generate_tuple_side_effect_impl!(A B C D E F);
+rearch_macros::generate_tuple_side_effect_impl!(A B C D E F G);
+rearch_macros::generate_tuple_side_effect_impl!(A B C D E F G H);
 
 /// Containers store the current data and state of the data flow graph created by capsules
 /// and their dependencies/dependents.
@@ -259,7 +197,6 @@ pub trait CapsuleList {
     type Data;
     fn read(self, container: &Container) -> Self::Data;
 }
-
 macro_rules! generate_capsule_list_impl {
     ($($C:ident),+) => {
         paste::paste! {
@@ -279,7 +216,6 @@ macro_rules! generate_capsule_list_impl {
         }
     };
 }
-
 generate_capsule_list_impl!(A);
 generate_capsule_list_impl!(A, B);
 generate_capsule_list_impl!(A, B, C);
@@ -479,9 +415,9 @@ mod tests {
 
         fn stateful(
             _: CapsuleReader,
-            register: SideEffectRegistrar,
-        ) -> (u8, std::sync::Arc<dyn Fn(u8) + Send + Sync>) {
-            let (state, set_state) = register(side_effects::StateEffect::new(0));
+            registrar: SideEffectRegistrar,
+        ) -> (u8, impl Fn(u8) + Clone + Send + Sync) {
+            let (state, set_state) = registrar.register(side_effects::state(0));
             (*state, set_state)
         }
 
@@ -521,6 +457,35 @@ mod tests {
         }
     }
 
+    #[test]
+    fn multiple_side_effect() {
+        fn foo(
+            _: CapsuleReader,
+            registrar: SideEffectRegistrar,
+        ) -> (
+            u8,
+            u8,
+            impl Fn(u8) + Clone + Send + Sync,
+            impl Fn(u8) + Clone + Send + Sync,
+        ) {
+            let ((s1, ss1), (s2, ss2)) =
+                registrar.register((side_effects::state(0), side_effects::state(1)));
+            (*s1, *s2, ss1, ss2)
+        }
+
+        let container = Container::new();
+
+        let (s1, s2, set1, set2) = container.read(foo);
+        assert_eq!(0, s1);
+        assert_eq!(1, s2);
+
+        set1(1);
+        set2(2);
+        let (s1, s2, _, _) = container.read(foo);
+        assert_eq!(1, s1);
+        assert_eq!(2, s2);
+    }
+
     // We use a more sophisticated graph here for a more thorough test of all functionality
     //
     // -> A -> B -> C -> D
@@ -532,9 +497,9 @@ mod tests {
     fn complex_dependency_graph() {
         fn stateful_a(
             _: CapsuleReader,
-            register: SideEffectRegistrar,
-        ) -> (u8, std::sync::Arc<dyn Fn(u8) + Send + Sync>) {
-            let (state, set_state) = register(side_effects::StateEffect::new(0));
+            registrar: SideEffectRegistrar,
+        ) -> (u8, impl Fn(u8) + Clone + Send + Sync) {
+            let (state, set_state) = registrar.register(side_effects::state(0));
             (*state, set_state)
         }
 
@@ -542,8 +507,8 @@ mod tests {
             get(stateful_a).0
         }
 
-        fn b(mut get: CapsuleReader, register: SideEffectRegistrar) -> u8 {
-            register(());
+        fn b(mut get: CapsuleReader, registrar: SideEffectRegistrar) -> u8 {
+            registrar.register(());
             get(a) + 1
         }
 
@@ -559,8 +524,8 @@ mod tests {
             get(a) + get(h)
         }
 
-        fn f(mut get: CapsuleReader, register: SideEffectRegistrar) -> u8 {
-            register(());
+        fn f(mut get: CapsuleReader, registrar: SideEffectRegistrar) -> u8 {
+            registrar.register(());
             get(e)
         }
 

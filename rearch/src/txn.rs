@@ -1,9 +1,8 @@
+use concread::hashmap::{HashMapReadTxn, HashMapWriteTxn};
 use std::{
     any::{Any, TypeId},
     collections::HashSet,
 };
-
-use concread::hashmap::{HashMapReadTxn, HashMapWriteTxn};
 
 use crate::{Capsule, CapsuleData, CapsuleManager, CapsuleRebuilder};
 

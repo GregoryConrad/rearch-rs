@@ -1,64 +1,57 @@
-use std::{cell::OnceCell, marker::PhantomData, sync::Arc};
+use std::cell::OnceCell;
 
-use crate::{SideEffect, SideEffectRebuilder};
+use crate::{SideEffect, SideEffectRegistrar};
 
-// Note: We use Arc/Box<dyn Fn()> extensively throughout the SideEffect::Apis in order to:
-// - Improve users' testability (it is difficult to mock static dispatch from SideEffect::Apis)
-// - Improve performance (somehow Arc performed slightly better than static dispatch on benchmarks)
-// - Avoid yet another nightly requirement (feature gate `impl_trait_in_assoc_type`)
-
-type Rebuilder<T> = Box<dyn SideEffectRebuilder<T>>;
-
-pub struct StateEffect<T>(T);
-impl<T> StateEffect<T> {
-    pub const fn new(default: T) -> Self {
-        Self(default)
-    }
-}
-impl<T: Send + 'static> SideEffect for StateEffect<T> {
-    type Api<'a> = (&'a mut T, Arc<dyn Fn(T) + Send + Sync>);
-
-    fn api(&mut self, rebuild: Rebuilder<Self>) -> Self::Api<'_> {
-        (
-            &mut self.0,
-            Arc::new(move |new_state| {
-                rebuild(Box::new(|effect| effect.0 = new_state));
-            }),
-        )
+pub fn state<'a, T: Send + 'static>(
+    initial: T,
+) -> impl SideEffect<'a, Api = (&'a mut T, impl Fn(T) + Clone + Send + Sync)> {
+    move |register: SideEffectRegistrar<'a>| {
+        let (state, rebuild) = register.raw(initial);
+        let set_state = move |new_state| {
+            rebuild(Box::new(|state| *state = new_state));
+        };
+        (state, set_state)
     }
 }
 
 // This uses a hacked together Lazy implementation because LazyCell doesn't have force_mut;
 // see https://github.com/rust-lang/rust/issues/109736#issuecomment-1605787094
-pub struct LazyStateEffect<T, F: FnOnce() -> T>(OnceCell<T>, Option<F>);
-impl<T, F: FnOnce() -> T> LazyStateEffect<T, F> {
-    pub const fn new(default: F) -> Self {
-        Self(OnceCell::new(), Some(default))
-    }
-}
-impl<T, F> SideEffect for LazyStateEffect<T, F>
+pub fn lazy_state<'a, T, F>(
+    init: F,
+) -> impl SideEffect<'a, Api = (&'a mut T, impl Fn(T) + Clone + Send + Sync)>
 where
     T: Send + 'static,
     F: FnOnce() -> T + Send + 'static,
 {
-    type Api<'a> = (&'a mut T, Arc<dyn Fn(T) + Send + Sync>);
-
-    fn api(&mut self, rebuild: Rebuilder<Self>) -> Self::Api<'_> {
-        self.0.get_or_init(|| {
-            std::mem::take(&mut self.1).expect("Init fn should be present for state init")()
-        });
-        (
-            self.0.get_mut().expect("'State initialized above"),
-            Arc::new(move |new_state| {
-                rebuild(Box::new(|effect| {
-                    effect.0.take();
-                    _ = effect.0.set(new_state);
-                }));
-            }),
-        )
+    move |register: SideEffectRegistrar<'a>| {
+        let ((cell, f), rebuild) = register.raw((OnceCell::new(), Some(init)));
+        cell.get_or_init(|| std::mem::take(f).expect("Init fn should be present for cell init")());
+        let state = cell.get_mut().expect("State initialized above");
+        let set_state = move |new_state| {
+            rebuild(Box::new(|effect| {
+                effect.0.take();
+                _ = effect.0.set(new_state);
+            }));
+        };
+        (state, set_state)
     }
 }
 
+// fn sync_persist<Read, Write, R, T>(read: Read, write: Write) {
+//     move |register| {
+//         let ((state, set_state), write) = register(lazy_state(read), value(Arc::new(write)));
+
+//         let write = Arc::clone(write);
+//         let persist = move |new_data| {
+//             let persist_result = write(new_data);
+//             set_state(persist_result);
+//         };
+
+//         (state, Arc::new(persist))
+//     }
+// }
+
+/*
 pub struct ValueEffect<T>(T);
 impl<T> ValueEffect<T> {
     pub const fn new(value: T) -> Self {
@@ -225,6 +218,7 @@ where
         (state, Arc::new(persist))
     }
 }
+*/
 
 // TODO convert below side effects too
 /*

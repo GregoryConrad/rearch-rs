@@ -1,6 +1,4 @@
-use std::sync::Arc;
-
-use rearch::{side_effects::StateEffect, CapsuleReader, Container, SideEffectRegistrar};
+use rearch::{side_effects, CapsuleReader, Container, SideEffectRegistrar};
 
 fn count(_: CapsuleReader, _: SideEffectRegistrar) -> i32 {
     0
@@ -19,13 +17,13 @@ fn crazy(mut get: CapsuleReader, _: SideEffectRegistrar) -> &'static str {
 fn big_string_factory(
     mut get: CapsuleReader,
     _: SideEffectRegistrar,
-) -> Arc<dyn Fn(&str) -> String + Send + Sync> {
+) -> impl Fn(&str) -> String + Clone + Send + Sync {
     let count = get(count);
     let count_plus_one = get(count_plus_one);
     let crazy = get(crazy);
-    Arc::new(move |other| {
+    move |other| {
         format!("param: {other}, count: {count}, count_plus_one: {count_plus_one}, crazy: {crazy}")
-    })
+    }
 }
 
 fn uses_factory(mut get: CapsuleReader, _: SideEffectRegistrar) -> String {
@@ -35,8 +33,8 @@ fn uses_factory(mut get: CapsuleReader, _: SideEffectRegistrar) -> String {
 fn stateful(
     _: CapsuleReader,
     register: SideEffectRegistrar,
-) -> (u32, Arc<dyn Fn(u32) + Send + Sync>) {
-    let (state, set_state) = register(StateEffect::new(0));
+) -> (u32, impl Fn(u32) + Clone + Send + Sync) {
+    let (state, set_state) = register(side_effects::state(0));
     (*state, set_state)
 }
 
