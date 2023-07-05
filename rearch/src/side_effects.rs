@@ -1,4 +1,4 @@
-use std::cell::OnceCell;
+use std::{cell::OnceCell, sync::Arc};
 
 use crate::{SideEffect, SideEffectRegistrar};
 
@@ -37,58 +37,34 @@ where
     }
 }
 
-// fn sync_persist<Read, Write, R, T>(read: Read, write: Write) {
-//     move |register| {
-//         let ((state, set_state), write) = register(lazy_state(read), value(Arc::new(write)));
-
-//         let write = Arc::clone(write);
-//         let persist = move |new_data| {
-//             let persist_result = write(new_data);
-//             set_state(persist_result);
-//         };
-
-//         (state, Arc::new(persist))
-//     }
-// }
-
-/*
-pub struct ValueEffect<T>(T);
-impl<T> ValueEffect<T> {
-    pub const fn new(value: T) -> Self {
-        Self(value)
-    }
-}
-impl<T> SideEffect for ValueEffect<T>
-where
-    T: Send + 'static,
-{
-    type Api<'a> = &'a mut T;
-
-    fn api(&mut self, _: Rebuilder<Self>) -> Self::Api<'_> {
-        &mut self.0
+pub fn value<'a, T: Send + 'static>(value: T) -> impl SideEffect<'a, Api = &'a mut T> {
+    move |register: SideEffectRegistrar<'a>| {
+        let (state, _) = register.raw(value);
+        state
     }
 }
 
 // This uses a hacked together Lazy implementation because LazyCell doesn't have force_mut;
 // see https://github.com/rust-lang/rust/issues/109736#issuecomment-1605787094
-pub struct LazyValueEffect<T, F: FnOnce() -> T>(OnceCell<T>, Option<F>);
-impl<T, F: FnOnce() -> T> LazyValueEffect<T, F> {
-    pub const fn new(init: F) -> Self {
-        Self(OnceCell::new(), Some(init))
-    }
-}
-impl<T, F> SideEffect for LazyValueEffect<T, F>
+pub fn lazy_value<'a, T, F>(init: F) -> impl SideEffect<'a, Api = &'a mut T>
 where
     T: Send + 'static,
     F: FnOnce() -> T + Send + 'static,
 {
-    type Api<'a> = &'a mut T;
+    move |register: SideEffectRegistrar<'a>| {
+        let ((cell, f), _) = register.raw((OnceCell::new(), Some(init)));
+        cell.get_or_init(|| std::mem::take(f).expect("Init fn should be present for cell init")());
+        cell.get_mut().expect("State initialized above")
+    }
+}
 
-    fn api(&mut self, _: Rebuilder<Self>) -> Self::Api<'_> {
-        self.0.get_or_init(|| {
-            std::mem::take(&mut self.1).expect("Init fn should be present for state init")()
-        });
-        self.0.get_mut().expect("State initialized above")
+#[must_use]
+pub fn is_first_build<'a>() -> impl SideEffect<'a, Api = bool> {
+    move |register: SideEffectRegistrar<'a>| {
+        let has_built_before = register.register(value(false));
+        let is_first_build = !*has_built_before;
+        *has_built_before = true;
+        is_first_build
     }
 }
 
@@ -96,80 +72,60 @@ where
 /// YOU SHOULD ALMOST NEVER USE THIS SIDE EFFECT!
 /// Only use this side effect when you don't have any state that you wish to update in the rebuild
 /// (which is extremely rare).
-#[derive(Default)]
-pub struct RebuilderEffect;
-impl RebuilderEffect {
-    #[must_use]
-    pub const fn new() -> Self {
-        Self
-    }
-}
-impl SideEffect for RebuilderEffect {
-    type Api<'a> = Arc<dyn Fn() + Send + Sync>;
-
-    fn api(&mut self, rebuild: Rebuilder<Self>) -> Self::Api<'_> {
-        Arc::new(move || rebuild(Box::new(|_| {})))
+#[must_use]
+pub fn rebuilder<'a>() -> impl SideEffect<'a, Api = impl Fn() + Clone + Send + Sync> {
+    move |register: SideEffectRegistrar<'a>| {
+        let ((), rebuild) = register.raw(());
+        move || rebuild(Box::new(|_| {}))
     }
 }
 
-pub type RunOnceEffect<F> = LazyValueEffect<(), F>;
-
-/// Side effect that runs a callback whenever it changes and is dropped.
-/// Similar to `useEffect` from React.
-pub struct RunOnChangeEffect<F: FnOnce()>(Option<F>);
-impl<F: FnOnce()> Default for RunOnChangeEffect<F> {
-    fn default() -> Self {
-        Self(None)
-    }
-}
-impl<F: FnOnce()> RunOnChangeEffect<F> {
-    #[must_use]
-    pub fn new() -> Self {
-        Self::default()
-    }
-}
-impl<F: FnOnce()> Drop for RunOnChangeEffect<F> {
-    fn drop(&mut self) {
-        if let Some(callback) = std::mem::take(&mut self.0) {
-            callback();
-        }
-    }
-}
-impl<F> SideEffect for RunOnChangeEffect<F>
+pub fn run_once<'a, F>(f: F) -> impl SideEffect<'a, Api = ()>
 where
     F: FnOnce() + Send + 'static,
 {
-    type Api<'a> = Box<dyn FnMut(F) + 'a>;
-
-    fn api(&mut self, _: Rebuilder<Self>) -> Self::Api<'_> {
-        Box::new(move |new_effect| {
-            if let Some(callback) = std::mem::take(&mut self.0) {
-                callback();
-            }
-            self.0 = Some(new_effect);
-        })
+    move |register: SideEffectRegistrar<'a>| {
+        register.register(lazy_value(f));
     }
 }
 
-#[derive(Default)]
-pub struct IsFirstBuildEffect {
-    has_built: bool,
-}
-impl IsFirstBuildEffect {
-    #[must_use]
-    pub fn new() -> Self {
-        Self::default()
-    }
-}
-impl SideEffect for IsFirstBuildEffect {
-    type Api<'a> = bool;
+// TODO
+// /// Side effect that runs a callback whenever it changes and is dropped.
+// /// Similar to `useEffect` from React.
+// pub struct RunOnChangeEffect<F: FnOnce()>(Option<F>);
+// impl<F: FnOnce()> Default for RunOnChangeEffect<F> {
+//     fn default() -> Self {
+//         Self(None)
+//     }
+// }
+// impl<F: FnOnce()> RunOnChangeEffect<F> {
+//     #[must_use]
+//     pub fn new() -> Self {
+//         Self::default()
+//     }
+// }
+// impl<F: FnOnce()> Drop for RunOnChangeEffect<F> {
+//     fn drop(&mut self) {
+//         if let Some(callback) = std::mem::take(&mut self.0) {
+//             callback();
+//         }
+//     }
+// }
+// impl<F> SideEffect for RunOnChangeEffect<F>
+// where
+//     F: FnOnce() + Send + 'static,
+// {
+//     type Api<'a> = Box<dyn FnMut(F) + 'a>;
 
-    fn api(&mut self, _: Rebuilder<Self>) -> Self::Api<'_> {
-        let is_first_build = !self.has_built;
-        self.has_built = true;
-        is_first_build
-    }
-}
+//     fn api(&mut self, _: Rebuilder<Self>) -> Self::Api<'_> {
+//         Box::new(move |new_effect| {
+//             if let Some(callback) = std::mem::take(&mut self.0) {
+//                 callback();
+//             }
+//             self.0 = Some(new_effect);
+//         })
+//     }
+// }
 
 /// A thin wrapper around the state side effect that enables easy state persistence.
 ///
@@ -180,34 +136,19 @@ impl SideEffect for IsFirstBuildEffect {
 /// Note: when possible, it is highly recommended to use async persist instead of sync persist.
 /// This effect is blocking, which will prevent other capsule updates.
 /// However, this function is perfect for quick I/O, like when using something similar to redb.
-pub struct SyncPersistEffect<Read: FnOnce() -> R, Write, R, T> {
-    data: (LazyStateEffect<R, Read>, ValueEffect<Arc<Write>>),
-    ghost: PhantomData<T>,
-}
-impl<Read: FnOnce() -> R, Write, R, T> SyncPersistEffect<Read, Write, R, T> {
-    pub fn new(read: Read, write: Write) -> Self {
-        Self {
-            data: (
-                LazyStateEffect::new(read),
-                ValueEffect::new(Arc::new(write)),
-            ),
-            ghost: PhantomData,
-        }
-    }
-}
-impl<Read, Write, R, T> SideEffect for SyncPersistEffect<Read, Write, R, T>
+pub fn sync_persist<'a, Read, Write, R, T>(
+    read: Read,
+    write: Write,
+) -> impl SideEffect<'a, Api = (&'a R, impl Fn(T) + Clone + Send + Sync)>
 where
     T: Send + 'static,
     R: Send + 'static,
     Read: FnOnce() -> R + Send + 'static,
     Write: Fn(T) -> R + Send + Sync + 'static,
 {
-    type Api<'a> = (&'a R, Arc<dyn Fn(T) + Send + Sync>);
-
-    fn api(&mut self, rebuild: Rebuilder<Self>) -> Self::Api<'_> {
-        let ((state, set_state), write) = self.data.api(Box::new(move |mutation| {
-            rebuild(Box::new(move |effect| mutation(&mut effect.data)));
-        }));
+    move |register: SideEffectRegistrar<'a>| {
+        let ((state, set_state), write) =
+            register.register((lazy_state(read), value(Arc::new(write))));
 
         let write = Arc::clone(write);
         let persist = move |new_data| {
@@ -215,10 +156,9 @@ where
             set_state(persist_result);
         };
 
-        (state, Arc::new(persist))
+        (&*state, persist)
     }
 }
-*/
 
 // TODO convert below side effects too
 /*

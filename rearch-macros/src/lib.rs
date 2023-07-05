@@ -15,7 +15,7 @@ pub fn generate_tuple_side_effect_impl(input: TokenStream) -> TokenStream {
         .map(|ident| format_ident!("{ident}"))
         .collect::<Vec<_>>();
     let once_cell_inits = (0..types.len()).map(|_| quote! { OnceCell::new() });
-    let individual_apis = (0..types.len()).map(|i| syn::Index::from(i)).map(|i| {
+    let individual_apis = (0..types.len()).map(syn::Index::from).map(|i| {
         quote! {
             self.#i.build(SideEffectRegistrar::new(&mut all_states.#i, {
                 let rebuild_all = rebuild_all.clone();
