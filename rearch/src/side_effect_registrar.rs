@@ -75,6 +75,7 @@ impl<'a> SideEffectRegistrar<'a> {
 }
 
 // One arg register needs its own impl because tuples with one effect don't impl SideEffect
+#[cfg(feature = "better-api")]
 impl<'a, S: SideEffect<'a>> FnOnce<(S,)> for SideEffectRegistrar<'a> {
     type Output = S::Api;
     extern "rust-call" fn call_once(self, (effect,): (S,)) -> Self::Output {
@@ -84,6 +85,7 @@ impl<'a, S: SideEffect<'a>> FnOnce<(S,)> for SideEffectRegistrar<'a> {
 macro_rules! generate_side_effect_registrar_fn_impl {
     ($($types:ident),*) => {
         #[allow(unused_parens, non_snake_case)]
+        #[cfg(feature = "better-api")]
         impl<'a, $($types: SideEffect<'a>),*> FnOnce<($($types,)*)> for SideEffectRegistrar<'a> {
             type Output = ($($types::Api),*);
             extern "rust-call" fn call_once(self, args: ($($types),*)) -> Self::Output {

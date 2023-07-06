@@ -26,3 +26,6 @@ logging = ["dep:log"]
 
 # Enables `Future`-based builtin side effects with tokio
 tokio-side-effects = ["dep:tokio"]
+
+# Enables the cleaner/better api, but unfortunately requires nightly
+better-api = []

@@ -12,9 +12,7 @@
     clippy::unwrap_used
 )]
 #![feature(trait_upcasting)]
-// TODO make these two opt-in via a temporary "better-api" feature that requires nightly
-#![feature(unboxed_closures)]
-#![feature(fn_traits)]
+#![cfg_attr(feature = "better-api", feature(unboxed_closures, fn_traits))]
 
 use dyn_clone::DynClone;
 use std::{
@@ -388,8 +386,8 @@ mod tests {
             0
         }
 
-        fn count_plus_one(mut get: CapsuleReader, _: SideEffectRegistrar) -> u8 {
-            get(count) + 1
+        fn count_plus_one(mut reader: CapsuleReader, _: SideEffectRegistrar) -> u8 {
+            reader.read(count) + 1
         }
 
         let container = Container::new();
@@ -421,8 +419,8 @@ mod tests {
             (*state, set_state)
         }
 
-        fn dependent(mut get: CapsuleReader, _: SideEffectRegistrar) -> u8 {
-            get(stateful).0 + 1
+        fn dependent(mut reader: CapsuleReader, _: SideEffectRegistrar) -> u8 {
+            reader.read(stateful).0 + 1
         }
 
         #[test]
@@ -503,34 +501,34 @@ mod tests {
             (*state, set_state)
         }
 
-        fn a(mut get: CapsuleReader, _: SideEffectRegistrar) -> u8 {
-            get(stateful_a).0
+        fn a(mut reader: CapsuleReader, _: SideEffectRegistrar) -> u8 {
+            reader.read(stateful_a).0
         }
 
-        fn b(mut get: CapsuleReader, registrar: SideEffectRegistrar) -> u8 {
+        fn b(mut reader: CapsuleReader, registrar: SideEffectRegistrar) -> u8 {
             registrar.register(());
-            get(a) + 1
+            reader.read(a) + 1
         }
 
-        fn c(mut get: CapsuleReader, _: SideEffectRegistrar) -> u8 {
-            get(b) + get(f)
+        fn c(mut reader: CapsuleReader, _: SideEffectRegistrar) -> u8 {
+            reader.read(b) + reader.read(f)
         }
 
-        fn d(mut get: CapsuleReader, _: SideEffectRegistrar) -> u8 {
-            get(c)
+        fn d(mut reader: CapsuleReader, _: SideEffectRegistrar) -> u8 {
+            reader.read(c)
         }
 
-        fn e(mut get: CapsuleReader, _: SideEffectRegistrar) -> u8 {
-            get(a) + get(h)
+        fn e(mut reader: CapsuleReader, _: SideEffectRegistrar) -> u8 {
+            reader.read(a) + reader.read(h)
         }
 
-        fn f(mut get: CapsuleReader, registrar: SideEffectRegistrar) -> u8 {
+        fn f(mut reader: CapsuleReader, registrar: SideEffectRegistrar) -> u8 {
             registrar.register(());
-            get(e)
+            reader.read(e)
         }
 
-        fn g(mut get: CapsuleReader, _: SideEffectRegistrar) -> u8 {
-            get(c) + get(f)
+        fn g(mut reader: CapsuleReader, _: SideEffectRegistrar) -> u8 {
+            reader.read(c) + reader.read(f)
         }
 
         fn h(_: CapsuleReader, _: SideEffectRegistrar) -> u8 {
