@@ -18,7 +18,7 @@ fn count(register: SideEffectRegistrar) -> (u8, impl Fn(u8) + Clone + Send + Syn
 
 #[capsule]
 fn count_plus_one() -> u8 {
-  $count + 1
+  $count.0 + 1
 }
 
 let container = Container::new();
@@ -35,7 +35,7 @@ fn count(
 }
 
 fn count_plus_one(mut get: CapsuleReader, _: SideEffectRegistrar) -> u8 {
-  get(count) + 1
+  get(count).0 + 1
 }
 
 let container = Container::new();
@@ -52,7 +52,7 @@ fn count(
 }
 
 fn count_plus_one(mut reader: CapsuleReader, _: SideEffectRegistrar) -> u8 {
-  reader.read(count) + 1
+  reader.read(count).0 + 1
 }
 
 let container = Container::new();
