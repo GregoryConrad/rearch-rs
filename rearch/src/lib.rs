@@ -35,16 +35,15 @@ pub use side_effect_registrar::*;
 mod txn;
 pub use txn::*;
 
-// TODO capsule macro
-// TODO side effect macro to remove the `move |register| {}` boilerplate
-// TODO aggressive garbage collection mode
-//   (delete all created super pure capsules that aren't needed at end of a requested build)
 // TODO listener function instead of exposed garbage collection.
 //   container.listen(|get| do_something(get(some_capsule)))
 //   returns a ListenerKeepAlive that removes listener once dropped
 //   internally implemented as an "impure" capsule that is dropped when keep alive drops
 //   what about the listener's dependencies? should they be trimmed if possible?
 //   maybe go off container's aggressiveness setting
+// TODO side effect macro to bust the `move |register| {}` boilerplate
+// TODO aggressive garbage collection mode
+//   (delete all created super pure capsules that aren't needed at end of a requested build)
 
 /// Capsules are blueprints for creating some immutable data
 /// and do not actually contain any data themselves.

@@ -1,5 +1,5 @@
 use proc_macro::TokenStream;
-use quote::{format_ident, quote};
+use quote::{format_ident, quote, ToTokens};
 use syn::parse_macro_input;
 
 /// Macro for handling some implementation boilerplate; do not use.
@@ -47,53 +47,30 @@ pub fn generate_tuple_side_effect_impl(input: TokenStream) -> TokenStream {
 pub fn capsule(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let input = parse_macro_input!(item as syn::ItemFn);
 
-    let (fn_name, capsule_name) = get_fn_and_capsule_names(&input);
-    let capsule_type = get_fn_return_type(&input);
-
-    let args = process_capsule_fn_params(&input, |ty| match ty {
-        // The capsule reader
-        syn::Type::Reference(_) => quote! { reader },
-        // The side effect handle
-        syn::Type::Path(_) => quote! { register },
-        // We don't allow for any other type of parameters
-        _ => panic!(concat!(
-            "Capsule functions can only consume ",
-            "a capsule reader ( reader: &mut impl CapsuleReader ) and ",
-            "a side effect registrant ( register: SideEffectRegistrar<'_> )"
-        )),
-    });
-
-    let _is_super_pure =
-        process_capsule_fn_params(&input, |ty| !matches!(ty, syn::Type::Path(_))).all(|b| b);
+    let fn_name = input.sig.ident.clone();
+    let fn_visibility = input.vis.clone();
+    let fn_ret_type = get_fn_return_type(&input);
+    let fn_registrar_parameter = get_fn_registrar_parameter(&input)
+        .map(|param| quote! { #param })
+        .unwrap_or(quote! { _: rearch::SideEffectRegistrar });
+    let fn_body: proc_macro2::TokenStream = {
+        let original = input.block.to_token_stream().to_string();
+        let re = regex::Regex::new(r"[^\w]_(\w+)").unwrap();
+        re.replace_all(&original, "__reader.read($1)")
+            .parse()
+            .unwrap()
+    };
 
     let capsule_impl = quote! {
-        #input
-
-        struct #capsule_name;
-
-        impl rearch::Capsule for #capsule_name {
-            type Data = #capsule_type;
-            fn build(
-                &self,
-                reader: &mut impl rearch::CapsuleReader<Data = Self::Data>,
-                register: rearch::SideEffectRegistrar<'_>
-            ) -> Self::Data {
-                #fn_name(#(#args),*)
-            }
+        #fn_visibility fn #fn_name(
+            mut __reader: rearch::CapsuleReader,
+            #fn_registrar_parameter,
+        ) -> #fn_ret_type {
+            #fn_body
         }
     };
 
     capsule_impl.into()
-}
-
-fn get_fn_and_capsule_names(input: &syn::ItemFn) -> (syn::Ident, syn::Ident) {
-    let fn_name = input.sig.ident.clone();
-    let capsule_name = {
-        let mut name = snake_to_pascal(&fn_name.to_string());
-        name.push_str("Capsule");
-        format_ident!("{name}")
-    };
-    (fn_name, capsule_name)
 }
 
 fn get_fn_return_type(input: &syn::ItemFn) -> syn::Type {
@@ -103,38 +80,19 @@ fn get_fn_return_type(input: &syn::ItemFn) -> syn::Type {
     }
 }
 
-fn process_capsule_fn_params<T, F>(
-    func: &syn::ItemFn,
-    mut param_mapper: F,
-) -> impl Iterator<Item = T>
-where
-    F: FnMut(syn::Type) -> T,
-{
-    func.sig
+fn get_fn_registrar_parameter(func: &syn::ItemFn) -> Option<syn::PatType> {
+    let mut paths = func
+        .sig
         .inputs
         .clone()
         .into_iter()
         .map(move |param| match param {
-            syn::FnArg::Receiver(_) => panic!("Capsule functions must be top-level"),
-            syn::FnArg::Typed(syn::PatType { ty, .. }) => param_mapper(*ty),
-        })
-}
-
-fn snake_to_pascal(s: &str) -> String {
-    s.split('_')
-        .map(|word| {
-            let mut chars = word.chars();
-            match chars.next() {
-                None => String::new(),
-                Some(first) => {
-                    let mut pascal_case = first.to_uppercase().to_string();
-                    pascal_case.extend(chars);
-                    pascal_case
-                }
-            }
-        })
-        .fold(String::new(), |mut total, curr| {
-            total.push_str(&curr);
-            total
-        })
+            syn::FnArg::Receiver(_) => panic!("Macro capsule functions must be top-level"),
+            syn::FnArg::Typed(pat) => pat,
+        });
+    let registrar_name = paths.next();
+    if registrar_name.is_some() && paths.next().is_some() {
+        panic!("Macro capsule functions may only consume 1 parameter, the SideEffectRegistrar");
+    }
+    registrar_name
 }

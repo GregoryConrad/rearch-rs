@@ -1,11 +1,13 @@
-use rearch::{side_effects, CapsuleReader, Container, SideEffectRegistrar};
+use rearch::{capsule, side_effects, CapsuleReader, Container, SideEffectRegistrar};
 
-fn count(_: CapsuleReader, _: SideEffectRegistrar) -> i32 {
+#[capsule]
+fn count() -> i32 {
     0
 }
 
-fn count_plus_one(mut reader: CapsuleReader, _: SideEffectRegistrar) -> i32 {
-    reader.read(count) + 1
+#[capsule]
+fn count_plus_one() -> i32 {
+    _count + 1
 }
 
 fn crazy(mut reader: CapsuleReader, _: SideEffectRegistrar) -> &'static str {
@@ -26,14 +28,13 @@ fn big_string_factory(
     }
 }
 
-fn uses_factory(mut reader: CapsuleReader, _: SideEffectRegistrar) -> String {
-    reader.read(big_string_factory)("argument supplied to factory")
+#[capsule]
+fn uses_factory() -> String {
+    _big_string_factory("argument supplied to factory")
 }
 
-fn stateful(
-    _: CapsuleReader,
-    registrar: SideEffectRegistrar,
-) -> (u32, impl Fn(u32) + Clone + Send + Sync) {
+#[capsule]
+fn stateful(registrar: SideEffectRegistrar) -> (u32, impl Fn(u32) + Clone + Send + Sync) {
     let (state, set_state) = registrar.register(side_effects::state(0));
     (*state, set_state)
 }
