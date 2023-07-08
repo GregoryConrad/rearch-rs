@@ -35,15 +35,11 @@ pub use side_effect_registrar::*;
 mod txn;
 pub use txn::*;
 
-// TODO listener function instead of exposed garbage collection.
-//   container.listen(|get| do_something(get(some_capsule)))
-//   returns a ListenerKeepAlive that removes listener once dropped
-//   internally implemented as an "impure" capsule that is dropped when keep alive drops
-//   what about the listener's dependencies? should they be trimmed if possible?
-//   maybe go off container's aggressiveness setting
 // TODO side effect macro to bust the `move |register| {}` boilerplate
-// TODO aggressive garbage collection mode
-//   (delete all created super pure capsules that aren't needed at end of a requested build)
+// TODO aggressive garbage collection mode, which:
+// - Deletes all created super pure leaf subgraphs at end of every requested build
+//   - There might only be one, including built node itself; think some more about this
+// - See what we can trim of a listener's dependencies when its handle is dropped
 
 /// Capsules are blueprints for creating some immutable data
 /// and do not actually contain any data themselves.
@@ -185,6 +181,74 @@ impl Container {
     /// spins up a write txn and initializes all needed capsules (which blocks).
     pub fn read<CL: CapsuleList>(&self, capsules: CL) -> CL::Data {
         capsules.read(self)
+    }
+
+    /// Provides a mechanism to *temporarily* listen to changes in some capsule(s).
+    /// The provided listener is called once at the time of the listener's registration,
+    /// and then once again everytime a dependency changes.
+    ///
+    /// Returns a `ListenerHandle`, which doesn't do anything other than implement Drop,
+    /// and its Drop implementation will remove `listener` from the Container.
+    ///
+    /// Thus, if you want the handle to live for as long as the Container itself,
+    /// it is instead recommended to create an impure capsule (just call `registrar.register(());`)
+    /// that acts as your listener. When you normally would call `Container::listen()`,
+    /// instead call `container.read(my_impure_listener)` to initialize it.
+    ///
+    /// # Panics
+    /// Panics if you attempt to register the same listener twice,
+    /// before the first `ListenerHandle` is dropped.
+    #[must_use]
+    pub fn listen<Listener>(&self, listener: Listener) -> ListenerHandle
+    where
+        Listener: Fn(CapsuleReader) + Send + 'static,
+    {
+        // We make a temporary *impure* capsule for the listener so that
+        // it doesn't get disposed by the super pure gc
+        let tmp_capsule = move |reader: CapsuleReader, registrar: SideEffectRegistrar| {
+            registrar.register(());
+            listener(reader);
+        };
+        let id = tmp_capsule.type_id();
+
+        // Put the temporary capsule into the container to listen to updates
+        self.with_write_txn(move |txn| {
+            assert_eq!(
+                txn.try_read(&tmp_capsule),
+                None,
+                "You cannot pass the same listener into Container::listen() {}",
+                "until the original returned ListenerHandle is dropped!"
+            );
+            txn.read_or_init(tmp_capsule);
+        });
+
+        ListenerHandle {
+            id,
+            store: Arc::downgrade(&self.0),
+        }
+    }
+}
+
+/// Represents a handle onto a particular listener, as created with `Container::listen()`.
+///
+/// This struct doesn't do anything other than implement Drop,
+/// and its Drop implementation will remove the listener from the Container.
+///
+/// Thus, if you want the handle to live for as long as the Container itself,
+/// it is instead recommended to create an impure capsule (just call `registrar.register(());`)
+/// that acts as your listener. When you normally would call `Container::listen()`,
+/// instead call `container.read(my_impure_listener)` to initialize it.
+pub struct ListenerHandle {
+    id: TypeId,
+    store: Weak<ContainerStore>,
+}
+impl Drop for ListenerHandle {
+    fn drop(&mut self) {
+        if let Some(store) = self.store.upgrade() {
+            // Note: The node is guaranteed to be in the graph here since it is a listener.
+            let rebuilder = CapsuleRebuilder(Weak::clone(&self.store));
+            store.with_write_txn(rebuilder, |txn| txn.dispose_single_node(self.id));
+        }
     }
 }
 
@@ -481,6 +545,50 @@ mod tests {
         let (s1, s2, _, _) = container.read(foo);
         assert_eq!(1, s1);
         assert_eq!(2, s2);
+    }
+
+    #[test]
+    fn listener_gets_updates() {
+        use std::sync::{Arc, Mutex};
+
+        fn stateful(
+            _: CapsuleReader,
+            registrar: SideEffectRegistrar,
+        ) -> (u8, impl Fn(u8) + Clone + Send + Sync) {
+            let (state, set_state) = registrar.register(side_effects::state(0));
+            (*state, set_state)
+        }
+
+        let states = Arc::new(Mutex::new(Vec::new()));
+
+        let listener = {
+            let states = states.clone();
+            move |mut reader: CapsuleReader| {
+                let mut states = states.lock().unwrap();
+                states.push(reader.read(stateful).0);
+            }
+        };
+
+        let container = Container::new();
+
+        container.read(stateful).1(1);
+        let handle = container.listen(listener.clone());
+        container.read(stateful).1(2);
+        container.read(stateful).1(3);
+
+        drop(handle);
+        container.read(stateful).1(4);
+
+        container.read(stateful).1(5);
+        let handle = container.listen(listener);
+        container.read(stateful).1(6);
+        container.read(stateful).1(7);
+
+        drop(handle);
+        container.read(stateful).1(8);
+
+        let states = states.lock().unwrap();
+        assert_eq!(*states, vec![1, 2, 3, 5, 6, 7]);
     }
 
     // We use a more sophisticated graph here for a more thorough test of all functionality

@@ -134,7 +134,7 @@ impl ContainerWriteTxn<'_> {
 
     /// Forcefully disposes only the requested node, cleaning up the node's direct dependencies.
     /// Panics if the node is not in the graph.
-    fn dispose_single_node(&mut self, id: TypeId) {
+    pub(crate) fn dispose_single_node(&mut self, id: TypeId) {
         self.data.remove(&id);
         self.nodes
             .remove(&id)
