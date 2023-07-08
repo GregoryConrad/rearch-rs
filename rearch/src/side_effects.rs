@@ -111,6 +111,46 @@ impl<F: FnOnce()> Drop for FunctionalDrop<F> {
     }
 }
 
+pub fn reducer<'a, State, Action, Reducer>(
+    reducer: Reducer,
+    initial: State,
+) -> impl SideEffect<'a, Api = (&'a State, impl Fn(Action) + Clone + Send + Sync + 'static)>
+where
+    State: Clone + Send + Sync + 'static,
+    Reducer: Fn(State, Action) -> State + Clone + Send + Sync + 'static,
+{
+    move |register: SideEffectRegistrar<'a>| {
+        let (state, set_state) = register.register(state(initial));
+        (&*state, {
+            let state = state.clone();
+            move |action| {
+                let state = state.clone();
+                set_state(reducer(state, action))
+            }
+        })
+    }
+}
+
+pub fn lazy_reducer<'a, State, Action, Reducer>(
+    reducer: Reducer,
+    initial: impl FnOnce() -> State + Send + 'static,
+) -> impl SideEffect<'a, Api = (&'a State, impl Fn(Action) + Clone + Send + Sync + 'static)>
+where
+    State: Clone + Send + Sync + 'static,
+    Reducer: Fn(State, Action) -> State + Clone + Send + Sync + 'static,
+{
+    move |register: SideEffectRegistrar<'a>| {
+        let (state, set_state) = register.register(lazy_state(initial));
+        (&*state, {
+            let state = state.clone();
+            move |action| {
+                let state = state.clone();
+                set_state(reducer(state, action))
+            }
+        })
+    }
+}
+
 /// A thin wrapper around the state side effect that enables easy state persistence.
 ///
 /// You provide a `read` function and a `write` function,
@@ -249,36 +289,6 @@ where
     (state, persist)
 }
 
-fn reducer_from_fn<State, Action, Reducer>(
-    &mut self,
-    reducer: Reducer,
-    initial_state: impl FnOnce() -> State,
-) -> (Arc<State>, impl Fn(Action) + Send + Sync + 'static)
-where
-    State: Send + Sync + 'static,
-    Reducer: Fn(&State, Action) -> State + Send + Sync + 'static,
-{
-    let (state, set_state) = self.state_from_fn(initial_state);
-    let dispatch = {
-        let state = state.clone();
-        move |action| {
-            set_state(reducer(&state, action));
-        }
-    };
-    (state, dispatch)
-}
-
-fn reducer<State, Action, Reducer>(
-    &mut self,
-    reducer: Reducer,
-    initial_state: State,
-) -> (Arc<State>, impl Fn(Action) + Send + Sync + 'static)
-where
-    State: Send + Sync + 'static,
-    Reducer: Fn(&State, Action) -> State + Send + Sync + 'static,
-{
-    self.reducer_from_fn(reducer, || initial_state)
-}
 
 fn rebuildless_nonce(&mut self) -> (u16, impl Fn() + Send + Sync + Clone + 'static) {
     let (nonce, set_nonce) = self.rebuildless_state(|| 0u16);
