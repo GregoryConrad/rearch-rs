@@ -89,43 +89,27 @@ where
     }
 }
 
-// TODO
-// /// Side effect that runs a callback whenever it changes and is dropped.
-// /// Similar to `useEffect` from React.
-// pub struct RunOnChangeEffect<F: FnOnce()>(Option<F>);
-// impl<F: FnOnce()> Default for RunOnChangeEffect<F> {
-//     fn default() -> Self {
-//         Self(None)
-//     }
-// }
-// impl<F: FnOnce()> RunOnChangeEffect<F> {
-//     #[must_use]
-//     pub fn new() -> Self {
-//         Self::default()
-//     }
-// }
-// impl<F: FnOnce()> Drop for RunOnChangeEffect<F> {
-//     fn drop(&mut self) {
-//         if let Some(callback) = std::mem::take(&mut self.0) {
-//             callback();
-//         }
-//     }
-// }
-// impl<F> SideEffect for RunOnChangeEffect<F>
-// where
-//     F: FnOnce() + Send + 'static,
-// {
-//     type Api<'a> = Box<dyn FnMut(F) + 'a>;
-
-//     fn api(&mut self, _: Rebuilder<Self>) -> Self::Api<'_> {
-//         Box::new(move |new_effect| {
-//             if let Some(callback) = std::mem::take(&mut self.0) {
-//                 callback();
-//             }
-//             self.0 = Some(new_effect);
-//         })
-//     }
-// }
+/// Side effect that runs a callback whenever it changes and is dropped.
+/// Similar to `useEffect` from React.
+pub fn run_on_change<'a, F>() -> impl SideEffect<'a, Api = impl FnMut(F) + 'a>
+where
+    F: FnOnce() + Send + 'static,
+{
+    move |register: SideEffectRegistrar<'a>| {
+        let state = register.register(value(FunctionalDrop(None)));
+        // The old callback, if there is one, will be called when it is dropped,
+        // via the `*state = ...` assignment below
+        |callback| *state = FunctionalDrop(Some(callback))
+    }
+}
+struct FunctionalDrop<F: FnOnce()>(Option<F>);
+impl<F: FnOnce()> Drop for FunctionalDrop<F> {
+    fn drop(&mut self) {
+        if let Some(callback) = std::mem::take(&mut self.0) {
+            callback();
+        }
+    }
+}
 
 /// A thin wrapper around the state side effect that enables easy state persistence.
 ///
