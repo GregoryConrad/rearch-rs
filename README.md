@@ -5,10 +5,12 @@
 </p>
 
 <p align="center">
-<img src="https://cdn.pixabay.com/photo/2020/06/17/17/02/sea-5310426_1280.jpg" width="75%" alt="Banner" />
+<img src="https://github.com/GregoryConrad/rearch-rs/blob/main/assets/tmp-banner.jpg?raw=true" width="75%" alt="Banner" />
 </p>
 
+<p align="center">
 rearch = re-imagined approach to application design and architecture
+</p>
 
 ---
 
