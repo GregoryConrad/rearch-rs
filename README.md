@@ -1,6 +1,30 @@
-# rearch-rs
+<p align="center">
+<a href="https://github.com/GregoryConrad/rearch-rs/actions"><img src="https://github.com/GregoryConrad/rearch-rs/actions/workflows/test.yml/badge.svg" alt="CI Status"></a>
+<a href="https://github.com/GregoryConrad/rearch-rs"><img src="https://img.shields.io/github/stars/GregoryConrad/rearch-rs.svg?style=flat&logo=github&colorB=deeppink&label=stars" alt="Github Stars"></a>
+<a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/license-MIT-purple.svg" alt="MIT License"></a>
+</p>
 
-The README is a large WIP, but below are some basics.
+<p align="center">
+<img src="https://cdn.pixabay.com/photo/2020/06/17/17/02/sea-5310426_1280.jpg" width="75%" alt="Banner" />
+</p>
+
+rearch = re-imagined approach to application design and architecture
+
+---
+
+## Features
+Specifically, rearch is a:
+- ⚡️ Reactive
+- 🔍 Testable
+- 🧱 Composable
+- 🔌 Extendable
+- ⬆️ Scalable
+- 💉 Dependency Injection
+
+Framework.
+
+# Under Construction
+This README is a large WIP, but there are some basics here.
 
 ## Getting Started
 First, you need to define some "capsules."
