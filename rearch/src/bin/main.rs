@@ -1,41 +1,38 @@
-use rearch::{capsule, side_effects, CapsuleReader, Container, SideEffectRegistrar};
+use rearch::{side_effects, CapsuleHandle, Container};
 
-#[capsule]
-fn count() -> i32 {
+fn count(_: CapsuleHandle) -> i32 {
     0
 }
 
-#[capsule]
-fn count_plus_one() -> i32 {
-    _count + 1
+fn count_plus_one(CapsuleHandle { mut get, .. }: CapsuleHandle) -> i32 {
+    get.get(count) + 1
 }
 
-fn crazy(mut reader: CapsuleReader, _: SideEffectRegistrar) -> &'static str {
-    reader.read(count);
-    reader.read(count_plus_one);
+fn crazy(CapsuleHandle { mut get, .. }: CapsuleHandle) -> &'static str {
+    get.get(count);
+    get.get(count_plus_one);
     "crazy!"
 }
 
 fn big_string_factory(
-    mut reader: CapsuleReader,
-    _: SideEffectRegistrar,
+    CapsuleHandle { mut get, .. }: CapsuleHandle,
 ) -> impl Fn(&str) -> String + Clone + Send + Sync {
-    let count = reader.read(count);
-    let count_plus_one = reader.read(count_plus_one);
-    let crazy = reader.read(crazy);
+    let count = get.get(count);
+    let count_plus_one = get.get(count_plus_one);
+    let crazy = get.get(crazy);
     move |other| {
         format!("param: {other}, count: {count}, count_plus_one: {count_plus_one}, crazy: {crazy}")
     }
 }
 
-#[capsule]
-fn uses_factory() -> String {
-    _big_string_factory("argument supplied to factory")
+fn uses_factory(CapsuleHandle { mut get, .. }: CapsuleHandle) -> String {
+    get.get(big_string_factory)("argument supplied to factory")
 }
 
-#[capsule]
-fn stateful(registrar: SideEffectRegistrar) -> (u32, impl Fn(u32) + Clone + Send + Sync) {
-    let (state, set_state) = registrar.register(side_effects::state(0));
+fn stateful(
+    CapsuleHandle { register, .. }: CapsuleHandle,
+) -> (u32, impl Fn(u32) + Clone + Send + Sync) {
+    let (state, set_state) = register.register(side_effects::state(0));
     (*state, set_state)
 }
 

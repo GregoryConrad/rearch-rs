@@ -29,7 +29,7 @@ impl<'scope, 'total> CapsuleReader<'scope, 'total> {
     ///
     /// # Panics
     /// Panics when a capsule attempts to read itself in its first build.
-    pub fn read<C: Capsule>(&mut self, capsule: C) -> C::Data {
+    pub fn get<C: Capsule>(&mut self, capsule: C) -> C::Data {
         match self {
             CapsuleReader::Normal { id, txn } => {
                 let (this, other) = (*id, TypeId::of::<C>());

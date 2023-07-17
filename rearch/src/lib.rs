@@ -22,8 +22,6 @@ use std::{
     sync::{Arc, Mutex, Weak},
 };
 
-pub use rearch_macros::capsule;
-
 pub mod side_effects;
 
 mod capsule_reader;
@@ -35,12 +33,6 @@ pub use side_effect_registrar::*;
 mod txn;
 pub use txn::*;
 
-// TODO side effect macro to bust the `move |register| {}` boilerplate
-// TODO aggressive garbage collection mode, which:
-// - Deletes all created super pure leaf subgraphs at end of every requested build
-//   - There might only be one, including built node itself; think some more about this
-// - See what we can trim of a listener's dependencies when its handle is dropped
-
 /// Capsules are blueprints for creating some immutable data
 /// and do not actually contain any data themselves.
 /// See the README for more.
@@ -50,7 +42,7 @@ pub use txn::*;
 // - `Send` is required because `CapsuleManager` needs to store a copy of the capsule
 // - `'static` is required to store a copy of the capsule, and for TypeId::of()
 // When trait aliases and associated type bounds are stable, this should be:
-//   `pub trait Capsule = Fn<(CapsuleReader, SideEffectRegistrar), Output: CapsuleData>;`
+//   `pub trait Capsule = Fn<(CapsuleHandle,), Output: CapsuleData>;`
 pub trait Capsule: Send + 'static {
     /// The type of data associated with this capsule.
     /// Capsule types must be `Clone + Send + Sync + 'static`.
@@ -66,17 +58,17 @@ pub trait Capsule: Send + 'static {
     ///
     /// ABSOLUTELY DO NOT TRIGGER ANY REBUILDS WITHIN THIS FUNCTION!
     /// Doing so will result in a deadlock.
-    fn build(&self, reader: CapsuleReader, effect: SideEffectRegistrar) -> Self::Data;
+    fn build(&self, handle: CapsuleHandle) -> Self::Data;
 }
 impl<T, F> Capsule for F
 where
     T: CapsuleData,
-    F: Fn(CapsuleReader, SideEffectRegistrar) -> T + Send + 'static,
+    F: Fn(CapsuleHandle) -> T + Send + 'static,
 {
     type Data = T;
 
-    fn build(&self, reader: CapsuleReader, registrar: SideEffectRegistrar) -> Self::Data {
-        self(reader, registrar)
+    fn build(&self, handle: CapsuleHandle) -> Self::Data {
+        self(handle)
     }
 }
 
@@ -85,6 +77,13 @@ where
 pub trait CapsuleData: Any + DynClone + Send + Sync + 'static {}
 impl<T: Clone + Send + Sync + 'static> CapsuleData for T {}
 dyn_clone::clone_trait_object!(CapsuleData);
+
+/// The handle given to [`Capsule`]s in order to [`Capsule::build`] their [`Capsule::Data`].
+/// See [`CapsuleReader`] and [`SideEffectRegistrar`] for more.
+pub struct CapsuleHandle<'txn_scope, 'txn_total, 'build> {
+    pub get: CapsuleReader<'txn_scope, 'txn_total>,
+    pub register: SideEffectRegistrar<'build>,
+}
 
 /// Represents a side effect that can be utilized within the build method.
 /// The key observation about side effects is that they form a tree, where each side effect:
@@ -205,9 +204,9 @@ impl Container {
     {
         // We make a temporary *impure* capsule for the listener so that
         // it doesn't get disposed by the super pure gc
-        let tmp_capsule = move |reader: CapsuleReader, registrar: SideEffectRegistrar| {
-            registrar.register(());
-            listener(reader);
+        let tmp_capsule = move |CapsuleHandle { get, register }: CapsuleHandle| {
+            register.register(());
+            listener(get);
         };
         let id = tmp_capsule.type_id();
 
@@ -403,10 +402,10 @@ impl CapsuleManager {
             capsule
                 .downcast_ref::<C>()
                 .expect("Types should be properly enforced due to generics")
-                .build(
-                    CapsuleReader::new(id, txn),
-                    SideEffectRegistrar::new(&mut side_effect, rebuilder),
-                )
+                .build(CapsuleHandle {
+                    get: CapsuleReader::new(id, txn),
+                    register: SideEffectRegistrar::new(&mut side_effect, rebuilder),
+                })
         };
 
         // Give manager ownership back over the fields we temporarily took
@@ -445,12 +444,12 @@ mod tests {
     /// Check for some fundamental functionality with the classic count example
     #[test]
     fn basic_count() {
-        fn count(_: CapsuleReader, _: SideEffectRegistrar) -> u8 {
+        fn count(_: CapsuleHandle) -> u8 {
             0
         }
 
-        fn count_plus_one(mut reader: CapsuleReader, _: SideEffectRegistrar) -> u8 {
-            reader.read(count) + 1
+        fn count_plus_one(CapsuleHandle { mut get, .. }: CapsuleHandle) -> u8 {
+            get.get(count) + 1
         }
 
         let container = Container::new();
@@ -475,15 +474,14 @@ mod tests {
         use crate::*;
 
         fn stateful(
-            _: CapsuleReader,
-            registrar: SideEffectRegistrar,
+            CapsuleHandle { register, .. }: CapsuleHandle,
         ) -> (u8, impl Fn(u8) + Clone + Send + Sync) {
-            let (state, set_state) = registrar.register(side_effects::state(0));
+            let (state, set_state) = register.register(side_effects::state(0));
             (*state, set_state)
         }
 
-        fn dependent(mut reader: CapsuleReader, _: SideEffectRegistrar) -> u8 {
-            reader.read(stateful).0 + 1
+        fn dependent(CapsuleHandle { mut get, .. }: CapsuleHandle) -> u8 {
+            get.get(stateful).0 + 1
         }
 
         #[test]
@@ -521,8 +519,7 @@ mod tests {
     #[test]
     fn multiple_side_effect() {
         fn foo(
-            _: CapsuleReader,
-            registrar: SideEffectRegistrar,
+            CapsuleHandle { register, .. }: CapsuleHandle,
         ) -> (
             u8,
             u8,
@@ -530,7 +527,7 @@ mod tests {
             impl Fn(u8) + Clone + Send + Sync,
         ) {
             let ((s1, ss1), (s2, ss2)) =
-                registrar.register((side_effects::state(0), side_effects::state(1)));
+                register.register((side_effects::state(0), side_effects::state(1)));
             (*s1, *s2, ss1, ss2)
         }
 
@@ -552,10 +549,9 @@ mod tests {
         use std::sync::{Arc, Mutex};
 
         fn stateful(
-            _: CapsuleReader,
-            registrar: SideEffectRegistrar,
+            CapsuleHandle { register, .. }: CapsuleHandle,
         ) -> (u8, impl Fn(u8) + Clone + Send + Sync) {
-            let (state, set_state) = registrar.register(side_effects::state(0));
+            let (state, set_state) = register.register(side_effects::state(0));
             (*state, set_state)
         }
 
@@ -565,7 +561,7 @@ mod tests {
             let states = states.clone();
             move |mut reader: CapsuleReader| {
                 let mut states = states.lock().unwrap();
-                states.push(reader.read(stateful).0);
+                states.push(reader.get(stateful).0);
             }
         };
 
@@ -601,44 +597,43 @@ mod tests {
     #[test]
     fn complex_dependency_graph() {
         fn stateful_a(
-            _: CapsuleReader,
-            registrar: SideEffectRegistrar,
+            CapsuleHandle { register, .. }: CapsuleHandle,
         ) -> (u8, impl Fn(u8) + Clone + Send + Sync) {
-            let (state, set_state) = registrar.register(side_effects::state(0));
+            let (state, set_state) = register.register(side_effects::state(0));
             (*state, set_state)
         }
 
-        fn a(mut reader: CapsuleReader, _: SideEffectRegistrar) -> u8 {
-            reader.read(stateful_a).0
+        fn a(CapsuleHandle { mut get, .. }: CapsuleHandle) -> u8 {
+            get.get(stateful_a).0
         }
 
-        fn b(mut reader: CapsuleReader, registrar: SideEffectRegistrar) -> u8 {
-            registrar.register(());
-            reader.read(a) + 1
+        fn b(CapsuleHandle { mut get, register }: CapsuleHandle) -> u8 {
+            register.register(());
+            get.get(a) + 1
         }
 
-        fn c(mut reader: CapsuleReader, _: SideEffectRegistrar) -> u8 {
-            reader.read(b) + reader.read(f)
+        fn c(CapsuleHandle { mut get, .. }: CapsuleHandle) -> u8 {
+            get.get(b) + get.get(f)
         }
 
-        fn d(mut reader: CapsuleReader, _: SideEffectRegistrar) -> u8 {
-            reader.read(c)
+        fn d(CapsuleHandle { mut get, .. }: CapsuleHandle) -> u8 {
+            get.get(c)
         }
 
-        fn e(mut reader: CapsuleReader, _: SideEffectRegistrar) -> u8 {
-            reader.read(a) + reader.read(h)
+        fn e(CapsuleHandle { mut get, .. }: CapsuleHandle) -> u8 {
+            get.get(a) + get.get(h)
         }
 
-        fn f(mut reader: CapsuleReader, registrar: SideEffectRegistrar) -> u8 {
-            registrar.register(());
-            reader.read(e)
+        fn f(CapsuleHandle { mut get, register }: CapsuleHandle) -> u8 {
+            register.register(());
+            get.get(e)
         }
 
-        fn g(mut reader: CapsuleReader, _: SideEffectRegistrar) -> u8 {
-            reader.read(c) + reader.read(f)
+        fn g(CapsuleHandle { mut get, .. }: CapsuleHandle) -> u8 {
+            get.get(c) + get.get(f)
         }
 
-        fn h(_: CapsuleReader, _: SideEffectRegistrar) -> u8 {
+        fn h(_: CapsuleHandle) -> u8 {
             1
         }
 
