@@ -35,26 +35,26 @@ pub use txn::*;
 
 /// Capsules are blueprints for creating some immutable data
 /// and do not actually contain any data themselves.
-/// See the README for more.
+/// See the documentation for more.
 ///
 /// *DO NOT MANUALLY IMPLEMENT THIS TRAIT YOURSELF!*
 /// It is an internal implementation detail that will likely be changed or removed in the future.
 // - `Send` is required because `CapsuleManager` needs to store a copy of the capsule
 // - `'static` is required to store a copy of the capsule, and for TypeId::of()
-// When trait aliases and associated type bounds are stable, this should be:
+// When trait aliases and associated type bounds are stable, this probably should be:
 //   `pub trait Capsule = Fn<(CapsuleHandle,), Output: CapsuleData>;`
 pub trait Capsule: Send + 'static {
     /// The type of data associated with this capsule.
-    /// Capsule types must be `Clone + Send + Sync + 'static`.
+    /// Capsule types must be `Clone + Send + Sync + 'static` (see [`CapsuleData`]).
     /// It is recommended to only put types with "cheap" clones in Capsules;
     /// think Copy types, small Vecs and other containers, basic data structures, and Arcs.
-    /// If you are dealing with a bigger chunk of data, consider wrapping it in an Arc.
+    /// If you are dealing with a bigger chunk of data, consider wrapping it in an [`Arc`].
     /// Note: The `im` crate plays *very nicely* with rearch.
     // Associated type so that Capsule can only be implemented once for each concrete type
     type Data: CapsuleData;
 
     /// Builds the capsule's immutable data using a given snapshot of the data flow graph.
-    /// (The snapshot, a `ContainerWriteTxn`, is abstracted away for you.)
+    /// (The snapshot, a `ContainerWriteTxn`, is abstracted away for you via [`CapsuleHandle`].)
     ///
     /// ABSOLUTELY DO NOT TRIGGER ANY REBUILDS WITHIN THIS FUNCTION!
     /// Doing so will result in a deadlock.
@@ -85,7 +85,7 @@ pub struct CapsuleHandle<'txn_scope, 'txn_total, 'build> {
     pub register: SideEffectRegistrar<'build>,
 }
 
-/// Represents a side effect that can be utilized within the build method.
+/// Represents a side effect that can be utilized within the build function.
 /// The key observation about side effects is that they form a tree, where each side effect:
 /// - Has its own private state (including composing other side effects together)
 /// - Presents some api to the build method, probably including a way to rebuild & update its state
@@ -102,7 +102,7 @@ pub trait SideEffect<'a> {
     /// - Anything else imaginable!
     type Api;
 
-    /// Construct this side effect's `Api` through the given `SideEffectRegistrar`
+    /// Construct this side effect's `Api` via the given [`SideEffectRegistrar`].
     fn build(self, registrar: SideEffectRegistrar<'a>) -> Self::Api;
 }
 impl<'a, T, F: FnOnce(SideEffectRegistrar<'a>) -> T> SideEffect<'a> for F {
@@ -203,7 +203,7 @@ impl Container {
         Listener: Fn(CapsuleReader) + Send + 'static,
     {
         // We make a temporary *impure* capsule for the listener so that
-        // it doesn't get disposed by the super pure gc
+        // it doesn't get disposed by the idempotent gc
         let tmp_capsule = move |CapsuleHandle { get, register }: CapsuleHandle| {
             register.register(());
             listener(get);
@@ -234,9 +234,9 @@ impl Container {
 /// and its Drop implementation will remove the listener from the Container.
 ///
 /// Thus, if you want the handle to live for as long as the Container itself,
-/// it is instead recommended to create an impure capsule (just call `registrar.register(());`)
-/// that acts as your listener. When you normally would call `Container::listen()`,
-/// instead call `container.read(my_impure_listener)` to initialize it.
+/// it is instead recommended to create a non-idempotent capsule (just call `register(());`)
+/// that acts as your listener. When you normally would call `container.listen()`,
+/// instead call `container.read(my_nonidempotent_listener)` to initialize it.
 pub struct ListenerHandle {
     id: TypeId,
     store: Weak<ContainerStore>,
@@ -328,7 +328,7 @@ impl CapsuleRebuilder {
 
             // Note: The node is guaranteed to be in the graph here since this is a rebuild.
             // (And to trigger a rebuild, a capsule must have used its side effect handle,
-            // and using the side effect handle prevents the super pure gc.)
+            // and using the side effect handle prevents the idempotent gc.)
             store.with_write_txn(self.clone(), |txn| {
                 // We have the txn now, so that means we also hold the data & nodes lock.
                 // Thus, this is where we should run the supplied mutation.
@@ -416,7 +416,7 @@ impl CapsuleManager {
         txn.data.insert(id, Box::new(new_data));
     }
 
-    fn is_super_pure(&self) -> bool {
+    fn is_idempotent(&self) -> bool {
         self.side_effect
             .as_ref()
             .expect(EXCLUSIVE_OWNER_MSG)
@@ -425,7 +425,7 @@ impl CapsuleManager {
     }
 
     fn is_disposable(&self) -> bool {
-        self.is_super_pure() && self.dependents.is_empty()
+        self.is_idempotent() && self.dependents.is_empty()
     }
 }
 
@@ -593,7 +593,7 @@ mod tests {
     //      \      / \
     //  H -> E -> F -> G
     //
-    // C, D, E, G, H are super pure. A, B, F are not.
+    // C, D, E, G, H are idempotent. A, B, F are not.
     #[test]
     fn complex_dependency_graph() {
         fn stateful_a(

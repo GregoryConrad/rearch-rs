@@ -176,9 +176,9 @@ impl ContainerWriteTxn<'_> {
         build_order_stack
     }
 
-    /// Helper function that given a `build_order`, garbage collects all super pure nodes
+    /// Helper function that given a `build_order`, garbage collects all idempotent nodes
     /// that have no dependents (i.e., they are entirely disposable)
-    /// and returns the new build order without the (now garbage collected) super pure nodes.
+    /// and returns the new build order without the (now garbage collected) idempotent nodes.
     /// While the build order specifies the order in which nodes must be built in to propagate
     /// updates, the reverse of the build order specifies the order in which we can trim down
     /// some fat through gc.
