@@ -18,6 +18,7 @@ rearch = re-imagined approach to application design and architecture
 ## Features
 Specifically, rearch is a:
 - ⚡️ Reactive
+- 🧮 Functional
 - 🔍 Testable
 - 🧱 Composable
 - 🔌 Extendable
