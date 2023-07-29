@@ -34,11 +34,17 @@ That's a mouthful! But in short, rearch is an entirely new approach to building 
 Define your "capsules" (en-_capsulated_ pieces of state) at the top level:
 
 ```rust
+// Capsules are simply functions that consume a CapsuleHandle.
+// The CapsuleHandle lets you get the state of other capsules,
+// in addition to using a large variety of side effects.
+
+// This capsule provides the count and a way to increment that count.
 fn count(CapsuleHandle { register, .. }: CapsuleHandle) -> (u8, impl Fn(u8) + Clone + Send + Sync) {
     let (state, set_state) = register(side_effects::state(0));
     (*state, set_state)
 }
 
+// This capsule provides the count, plus one.
 fn count_plus_one(CapsuleHandle { mut get, .. }: CapsuleHandle) -> u8 {
     get(count).0 + 1
 }
