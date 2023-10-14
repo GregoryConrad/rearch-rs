@@ -84,7 +84,7 @@ impl<A: Capsule> FnOnce<(A,)> for CapsuleReader<'_, '_> {
 #[cfg(feature = "better-api")]
 impl<A: Capsule> FnMut<(A,)> for CapsuleReader<'_, '_> {
     extern "rust-call" fn call_mut(&mut self, args: (A,)) -> Self::Output {
-        self.read(args.0)
+        self.get(args.0)
     }
 }
 
