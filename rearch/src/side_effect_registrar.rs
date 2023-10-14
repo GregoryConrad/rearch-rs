@@ -18,7 +18,7 @@ const PREVIOUS_INIT_FAILED_MSG: &str = "Side effect should've been initialized a
 /// Registers the given side effect and returns its build api.
 /// You can only call register once on purpose (it consumes self);
 /// to register multiple side effects, simply pass them in together!
-/// If you have a super pure capsule that you wish to make not super pure,
+/// If you have an idempotent capsule that you wish to make non-idempotent,
 /// simply call `register()` with no arguments.
 pub struct SideEffectRegistrar<'a> {
     side_effect: &'a mut OnceCell<Box<dyn Any + Send>>,
