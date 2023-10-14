@@ -14,6 +14,10 @@ pub fn raw<'a, T: Send + 'static>(
     move |register: SideEffectRegistrar<'a>| register.raw(initial)
 }
 
+pub fn as_listener<'a>() -> impl SideEffect<'a, Api = ()> {
+    |_: SideEffectRegistrar<'a>| {}
+}
+
 pub fn state<'a, T: Send + 'static>(
     initial: T,
 ) -> impl SideEffect<'a, Api = (&'a mut T, impl Fn(T) + Clone + Send + Sync)> {
