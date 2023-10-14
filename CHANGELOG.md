@@ -2,6 +2,22 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 - - -
+## 0.1.0 - 2023-10-14
+#### Bug Fixes
+- temporarily remove listen method until design is finalized - (78d1fa0) - Gregory Conrad
+- fix CapsuleReader when better-api feature enabled - (60d34ac) - Gregory Conrad
+#### Continuous Integration
+- add github release workflow - (d169bbc) - Gregory Conrad
+#### Documentation
+- add axum example - (55d39fc) - Gregory Conrad
+- update old terminology to idempotence - (1ececbc) - Gregory Conrad
+- add inline comments to README example - (11fcbb0) - Gregory Conrad
+- finish README - (078222d) - Gregory Conrad
+#### Features
+- add as_listener side effect - (7c7f2be) - Gregory Conrad
+
+- - -
+
 ## 0.0.1 - 2023-07-29
 #### Bug Fixes
 - rewrite garbage collection to use more idiomatic code - (a1a035e) - Gregory Conrad

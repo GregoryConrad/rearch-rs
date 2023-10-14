@@ -3,7 +3,7 @@ members = ["rearch-macros", "rearch"]
 resolver = "2"
 
 [workspace.package]
-version = "0.0.1"
+version = "0.1.0"
 edition = "2021"
 license = "MIT"
 description = "Re-imagined approach to application design and architecture"
