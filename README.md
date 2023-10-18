@@ -39,18 +39,22 @@ Define your "capsules" (en-_capsulated_ pieces of state) at the top level:
 // in addition to using a large variety of side effects.
 
 // This capsule provides the count and a way to increment that count.
-fn count(CapsuleHandle { register, .. }: CapsuleHandle) -> (u8, impl Fn(u8) + Clone + Send + Sync) {
-    let (state, set_state) = register(side_effects::state(0));
-    (*state, set_state)
+fn count_manager(
+    CapsuleHandle { register, .. }: CapsuleHandle,
+) -> (u8, impl Fn() + Clone + Send + Sync) {
+    let (count, set_count) = register(side_effects::state(0));
+    let increment_count = || set_count(count + 1);
+    (*count, increment_count)
 }
 
 // This capsule provides the count, plus one.
-fn count_plus_one(CapsuleHandle { mut get, .. }: CapsuleHandle) -> u8 {
-    get(count).0 + 1
+fn count_plus_one_capsule(CapsuleHandle { mut get, .. }: CapsuleHandle) -> u8 {
+    let (count, _increment_count) = get(count_manager);
+    count + 1
 }
 
 let container = Container::new();
-let ((count, set_count), count_plus_one) = container.read((count, count_plus_one));
+let ((count, increment_count), count_plus_one) = container.read((count, count_plus_one));
 ```
 
 ### Minimum Supported Rust Version (MSRV)
