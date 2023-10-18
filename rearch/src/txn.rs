@@ -182,6 +182,7 @@ impl ContainerWriteTxn<'_> {
     /// While the build order specifies the order in which nodes must be built in to propagate
     /// updates, the reverse of the build order specifies the order in which we can trim down
     /// some fat through gc.
+    // TODO(GregoryConrad): update this to use the mechanism currently used by rearch-dart
     fn garbage_collect_diposable_nodes(
         &mut self,
         build_order: impl DoubleEndedIterator<Item = TypeId>,

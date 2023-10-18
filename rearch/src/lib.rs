@@ -37,12 +37,11 @@ pub use txn::*;
 /// and do not actually contain any data themselves.
 /// See the documentation for more.
 ///
+// TODO(GregoryConrad): remove the following doc comment when this trait stabilizes.
 /// *DO NOT MANUALLY IMPLEMENT THIS TRAIT YOURSELF!*
 /// It is an internal implementation detail that will likely be changed or removed in the future.
 // - `Send` is required because `CapsuleManager` needs to store a copy of the capsule
 // - `'static` is required to store a copy of the capsule, and for TypeId::of()
-// When trait aliases and associated type bounds are stable, this probably should be:
-//   `pub trait Capsule = Fn<(CapsuleHandle,), Output: CapsuleData>;`
 pub trait Capsule: Send + 'static {
     /// The type of data associated with this capsule.
     /// Capsule types must be `Clone + Send + Sync + 'static` (see [`CapsuleData`]).
@@ -59,6 +58,9 @@ pub trait Capsule: Send + 'static {
     /// ABSOLUTELY DO NOT TRIGGER ANY REBUILDS WITHIN THIS FUNCTION!
     /// Doing so will result in a deadlock.
     fn build(&self, handle: CapsuleHandle) -> Self::Data;
+
+    // TODO(GregoryConrad): the following eq method to prevent propagation when possible
+    // fn eq(old: &Self::Data, new: &Self::Data) -> bool;
 }
 impl<T, F> Capsule for F
 where
@@ -182,7 +184,7 @@ impl Container {
         capsules.read(self)
     }
 
-    /*
+    /* TODO(GregoryConrad): uncomment this listener section once we have side effects figured out
     /// Provides a mechanism to *temporarily* listen to changes in some capsule(s).
     /// The provided listener is called once at the time of the listener's registration,
     /// and then once again everytime a dependency changes.
@@ -241,11 +243,12 @@ impl Container {
 
 /// Represents a handle onto a particular listener, as created with `Container::listen()`.
 ///
-/// This struct doesn't do anything other than implement Drop,
-/// and its Drop implementation will remove the listener from the Container.
+/// This struct doesn't do anything other than implement [`Drop`],
+/// and its [`Drop`] implementation will remove the listener from the Container.
 ///
 /// Thus, if you want the handle to live for as long as the Container itself,
-/// it is instead recommended to create a non-idempotent capsule (just call `register(());`)
+/// it is instead recommended to create a non-idempotent capsule
+/// (just call `register(as_listener());`)
 /// that acts as your listener. When you normally would call `container.listen()`,
 /// instead call `container.read(my_nonidempotent_listener)` to initialize it.
 pub struct ListenerHandle {
