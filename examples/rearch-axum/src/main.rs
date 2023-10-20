@@ -32,6 +32,7 @@ struct TodoWithId {
 }
 
 // We define our todo db capsules here
+use todo_db::*;
 mod todo_db {
     use std::sync::Arc;
 
@@ -140,7 +141,6 @@ mod todo_db {
         }
     }
 }
-use todo_db::{create_todo_capsule, delete_todo_capsule, list_todos_capsule, read_todo_capsule};
 
 async fn list_todos(State(container): State<Container>) -> Result<Json<Vec<TodoWithId>>, AppError> {
     let todos = container.read(list_todos_capsule)()?;
@@ -157,9 +157,9 @@ async fn create_todo(
 
 async fn read_todo(
     State(container): State<Container>,
-    Path(path): Path<Uuid>,
+    Path(uuid): Path<Uuid>,
 ) -> Result<String, AppError> {
-    let todo = container.read(read_todo_capsule)(path)?;
+    let todo = container.read(read_todo_capsule)(uuid)?;
     match todo {
         Some(todo) => Ok(todo),
         None => Err(AppError::TodoNotFound),
@@ -168,9 +168,9 @@ async fn read_todo(
 
 async fn delete_todo(
     State(container): State<Container>,
-    Path(path): Path<Uuid>,
+    Path(uuid): Path<Uuid>,
 ) -> Result<String, AppError> {
-    let todo = container.read(delete_todo_capsule)(path)?;
+    let todo = container.read(delete_todo_capsule)(uuid)?;
     match todo {
         Some(todo) => Ok(todo),
         None => Err(AppError::TodoNotFound),

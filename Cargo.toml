@@ -1,5 +1,5 @@
 [workspace]
-members = ["rearch-macros", "rearch"]
+members = ["rearch-macros", "rearch", "examples/rearch-axum"]
 resolver = "2"
 
 [workspace.package]
