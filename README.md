@@ -9,14 +9,14 @@
 </p>
 
 <p align="center">
-rearch = re-imagined approach to application design and architecture
+ReArch = re-imagined approach to application design and architecture
 </p>
 
 ---
 
 
 ## Features
-Specifically, rearch is a:
+Specifically, ReArch is a:
 - ⚡️ Reactive
 - 🧮 Functional
 - 🔍 Testable
@@ -27,7 +27,7 @@ Specifically, rearch is a:
 
 Framework.
 
-That's a mouthful! But in short, rearch is an entirely new approach to building applications.
+That's a mouthful! But in short, ReArch is an entirely new approach to building applications.
 
 
 ## In a Nutshell
@@ -57,26 +57,11 @@ let container = Container::new();
 let ((count, increment_count), count_plus_one) = container.read((count, count_plus_one));
 ```
 
-### Minimum Supported Rust Version (MSRV)
-The MSRV is currently nightly, at least until `trait_upcasting` stabilizes
-(which should be fairly soon based on the [tracking GitHub issue](https://github.com/rust-lang/rust/issues/65991)).
-Once it does stabilize, the MSRV will be the first stable Rust release with `trait_upcasting`.
-
-The MSRV will only increment on minor or major changes (minor/major in terms of semver).
-
-Further, it is worth mentioning that the example shown above requires nightly
-for `unboxed_closures` and `fn_traits`, which is feature-gated under the `better-api` feature.
-Once `unboxed_closures` and `fn_traits` stabilize,
-this nightly syntax will be the preferred syntax,
-and this will no longer be feature-gated.
-(Without nightly, you must instead call `get.get(some_capsule)` and `register.register(effect())`.)
-
-
 ## Getting Started
 Simply run:
 `cargo add rearch`
 
-And then just create one container for your application:
+Then, create one container for your application:
 ```dart
 fn main() {
   let container = Container::new();
@@ -84,8 +69,26 @@ fn main() {
 }
 ```
 
+And take a look at the [examples] to get an idea on how to make some of your own capsules!
+
 ### Documentation
-Now go take a look at [documentation]!
+Also, there is some WIP [documentation] that will help you learn the core concepts behind ReArch!
+
+
+## Minimum Supported Rust Version (MSRV)
+The MSRV is currently nightly, at least until `trait_upcasting` stabilizes
+(which should be fairly soon based on the [tracking GitHub issue](https://github.com/rust-lang/rust/issues/65991)).
+Once it does stabilize, the MSRV will be the first stable Rust release with `trait_upcasting`.
+
+The MSRV will only increment on minor or major changes (minor/major in terms of semver).
+
+Further, it is worth mentioning that the example shown in "In a Nutshell" above requires nightly
+for `unboxed_closures` and `fn_traits`, which is feature-gated under the `better-api` feature.
+Once `unboxed_closures` and `fn_traits` stabilize,
+this nightly syntax will be the preferred syntax,
+and this will no longer be feature-gated.
+(Without nightly, you must instead call the slightly more verbose
+`get.get(some_capsule)` and `register.register(effect())`.)
 
 
 ## Help Wanted!
@@ -104,3 +107,4 @@ Or, if you would like to contribute, here are some areas where I would really ap
 Chances are other developers can use it too.
 
 [documentation]: https://rearch.gsconrad.com
+[examples]: https://github.com/GregoryConrad/rearch-rs/tree/main/examples
