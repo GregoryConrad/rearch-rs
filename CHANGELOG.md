@@ -2,6 +2,18 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 - - -
+## 0.2.0 - 2023-11-06
+#### Documentation
+- add examples and reword README - (0b8029f) - Gregory Conrad
+- clarify code example in README - (ca6cd8a) - Gregory Conrad
+- add/improve code comments and panics - (35a2b98) - Gregory Conrad
+#### Features
+- add CData, rearch-tokio - (c4b36fb) - Gregory Conrad
+#### Style
+- change variable names and improve rearch-axum example - (d0d33c4) - Gregory Conrad
+
+- - -
+
 ## 0.1.0 - 2023-10-14
 #### Bug Fixes
 - temporarily remove listen method until design is finalized - (78d1fa0) - Gregory Conrad
