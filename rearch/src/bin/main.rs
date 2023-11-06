@@ -1,4 +1,4 @@
-use rearch::{side_effects, CapsuleHandle, Container};
+use rearch::{side_effects, CData, CapsuleHandle, Container};
 
 fn count(_: CapsuleHandle) -> i32 {
     0
@@ -16,7 +16,7 @@ fn crazy(CapsuleHandle { mut get, .. }: CapsuleHandle) -> &'static str {
 
 fn big_string_factory(
     CapsuleHandle { mut get, .. }: CapsuleHandle,
-) -> impl Fn(&str) -> String + Clone + Send + Sync {
+) -> impl CData + Fn(&str) -> String {
     let count = get.get(count);
     let count_plus_one = get.get(count_plus_one);
     let crazy = get.get(crazy);
@@ -29,9 +29,7 @@ fn uses_factory(CapsuleHandle { mut get, .. }: CapsuleHandle) -> String {
     get.get(big_string_factory)("argument supplied to factory")
 }
 
-fn stateful(
-    CapsuleHandle { register, .. }: CapsuleHandle,
-) -> (u32, impl Fn(u32) + Clone + Send + Sync) {
+fn stateful(CapsuleHandle { register, .. }: CapsuleHandle) -> (u32, impl CData + Fn(u32)) {
     let (state, set_state) = register.register(side_effects::state(0));
     (*state, set_state)
 }

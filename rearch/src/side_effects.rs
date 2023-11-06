@@ -1,16 +1,10 @@
 use std::{cell::OnceCell, sync::Arc};
 
-use crate::{SideEffect, SideEffectRegistrar};
+use crate::{CData, SideEffect, SideEffectRegistrar};
 
 pub fn raw<'a, T: Send + 'static>(
     initial: T,
-) -> impl SideEffect<
-    'a,
-    Api = (
-        &'a mut T,
-        impl Fn(Box<dyn FnOnce(&mut T)>) + Clone + Send + Sync,
-    ),
-> {
+) -> impl SideEffect<'a, Api = (&'a mut T, impl CData + Fn(Box<dyn FnOnce(&mut T)>))> {
     move |register: SideEffectRegistrar<'a>| register.raw(initial)
 }
 
@@ -20,7 +14,7 @@ pub fn as_listener<'a>() -> impl SideEffect<'a, Api = ()> {
 
 pub fn state<'a, T: Send + 'static>(
     initial: T,
-) -> impl SideEffect<'a, Api = (&'a mut T, impl Fn(T) + Clone + Send + Sync)> {
+) -> impl SideEffect<'a, Api = (&'a mut T, impl CData + Fn(T))> {
     move |register: SideEffectRegistrar<'a>| {
         let (state, rebuild) = register.raw(initial);
         let set_state = move |new_state| {
@@ -32,9 +26,7 @@ pub fn state<'a, T: Send + 'static>(
 
 // This uses a hacked together Lazy implementation because LazyCell doesn't have force_mut;
 // see https://github.com/rust-lang/rust/issues/109736#issuecomment-1605787094
-pub fn lazy_state<'a, T, F>(
-    init: F,
-) -> impl SideEffect<'a, Api = (&'a mut T, impl Fn(T) + Clone + Send + Sync)>
+pub fn lazy_state<'a, T, F>(init: F) -> impl SideEffect<'a, Api = (&'a mut T, impl CData + Fn(T))>
 where
     T: Send + 'static,
     F: FnOnce() -> T + Send + 'static,
@@ -89,7 +81,7 @@ pub fn is_first_build<'a>() -> impl SideEffect<'a, Api = bool> {
 /// Only use this side effect when you don't have any state that you wish to update in the rebuild
 /// (which is extremely rare).
 #[must_use]
-pub fn rebuilder<'a>() -> impl SideEffect<'a, Api = impl Fn() + Clone + Send + Sync> {
+pub fn rebuilder<'a>() -> impl SideEffect<'a, Api = impl CData + Fn()> {
     move |register: SideEffectRegistrar<'a>| {
         let ((), rebuild) = register.raw(());
         move || rebuild(Box::new(|_| {}))
@@ -131,7 +123,7 @@ impl<F: FnOnce()> Drop for FunctionalDrop<F> {
 pub fn reducer<'a, State, Action, Reducer>(
     reducer: Reducer,
     initial: State,
-) -> impl SideEffect<'a, Api = (State, impl Fn(Action) + Clone + Send + Sync)>
+) -> impl SideEffect<'a, Api = (State, impl CData + Fn(Action))>
 where
     State: Clone + Send + Sync + 'static,
     Reducer: Fn(State, Action) -> State + Clone + Send + Sync + 'static,
@@ -151,7 +143,7 @@ where
 pub fn lazy_reducer<'a, State, Action, Reducer>(
     reducer: Reducer,
     initial: impl FnOnce() -> State + Send + 'static,
-) -> impl SideEffect<'a, Api = (State, impl Fn(Action) + Clone + Send + Sync)>
+) -> impl SideEffect<'a, Api = (State, impl CData + Fn(Action))>
 where
     State: Clone + Send + Sync + 'static,
     Reducer: Fn(State, Action) -> State + Clone + Send + Sync + 'static,
@@ -180,7 +172,7 @@ where
 pub fn sync_persist<'a, Read, Write, R, T>(
     read: Read,
     write: Write,
-) -> impl SideEffect<'a, Api = (&'a R, impl Fn(T) + Clone + Send + Sync)>
+) -> impl SideEffect<'a, Api = (&'a R, impl CData + Fn(T))>
 where
     T: Send + 'static,
     R: Send + 'static,
@@ -195,174 +187,5 @@ where
             set_state(persist_result);
         };
         (&*state, persist)
-    }
-}
-
-#[cfg(feature = "tokio-side-effects")]
-pub use tokio_side_effects::*;
-
-#[cfg(feature = "tokio-side-effects")]
-mod tokio_side_effects {
-    use std::{cell::RefCell, future::Future, rc::Rc};
-
-    use super::*;
-
-    #[derive(Clone)]
-    pub enum AsyncState<T> {
-        Idle(Option<T>),
-        Loading(Option<T>),
-        Complete(T),
-    }
-
-    impl<T> AsyncState<T> {
-        pub fn data(self) -> Option<T> {
-            match self {
-                Self::Idle(previous_data) => previous_data,
-                Self::Loading(previous_data) => previous_data,
-                Self::Complete(data) => Some(data),
-            }
-        }
-    }
-
-    #[derive(Clone)]
-    pub enum AsyncPersistState<T> {
-        Loading(Option<T>),
-        Complete(T),
-    }
-
-    impl<T> AsyncPersistState<T> {
-        pub fn data(self) -> Option<T> {
-            match self {
-                Self::Loading(previous_data) => previous_data,
-                Self::Complete(data) => Some(data),
-            }
-        }
-    }
-
-    pub fn future<'a, T, F>(
-    ) -> impl SideEffect<'a, Api = (impl Fn() -> AsyncState<T> + 'a, impl FnMut(F) + 'a)>
-    where
-        T: Clone + Send + 'static,
-        F: Future<Output = T> + Send + 'static,
-    {
-        move |register: SideEffectRegistrar<'a>| {
-            let ((state, set_state), mut on_change) =
-                register.register((state(AsyncState::Idle(None)), run_on_change()));
-            let state = Rc::new(RefCell::new(state));
-            let get = {
-                let state = Rc::clone(&state);
-                move || state.borrow().clone()
-            };
-            let set = move |future| {
-                let mut state = state.borrow_mut();
-                let old_state = std::mem::replace(*state, AsyncState::Idle(None));
-                **state = AsyncState::Loading(old_state.data());
-
-                let set_state = set_state.clone();
-                let handle = tokio::spawn(async move {
-                    let data = future.await;
-                    set_state(AsyncState::Complete(data));
-                });
-                on_change(move || handle.abort());
-            };
-            (get, set)
-        }
-    }
-
-    pub fn mutation<'a, T, F>() -> impl SideEffect<
-        'a,
-        Api = (
-            AsyncState<T>,
-            impl Fn(F) + Clone + Send + Sync,
-            impl Fn() + Clone + Send + Sync,
-        ),
-    >
-    where
-        T: Clone + Send + 'static,
-        F: Future<Output = T> + Send + 'static,
-    {
-        move |register: SideEffectRegistrar<'a>| {
-            let ((state, rebuild), (_, on_change)) = register.register((
-                raw(AsyncState::Idle(None)),
-                // This immitates run_on_change, but for external use (outside of build)
-                state(FunctionalDrop(None)),
-            ));
-
-            let state = state.clone();
-            let mutate = {
-                let rebuild = rebuild.clone();
-                move |future| {
-                    rebuild(Box::new(|state| {
-                        let old_state = std::mem::replace(state, AsyncState::Idle(None));
-                        *state = AsyncState::Loading(old_state.data());
-                    }));
-
-                    let rebuild = rebuild.clone();
-                    let handle = tokio::spawn(async move {
-                        let data = future.await;
-                        rebuild(Box::new(move |state| {
-                            *state = AsyncState::Complete(data);
-                        }));
-                    });
-                    on_change(FunctionalDrop(Some(move || handle.abort())));
-                }
-            };
-            let clear = move || {
-                rebuild(Box::new(|state| {
-                    let old_state = std::mem::replace(state, AsyncState::Idle(None));
-                    *state = AsyncState::Idle(old_state.data());
-                }));
-            };
-            (state, mutate, clear)
-        }
-    }
-
-    pub fn async_persist<'a, T, R, Reader, Writer, ReadFuture, WriteFuture>(
-        read: Reader,
-        write: Writer,
-    ) -> impl SideEffect<'a, Api = (AsyncPersistState<R>, impl FnMut(T) + Send + Sync + Clone)>
-    where
-        T: Send + 'static,
-        R: Clone + Send + 'static,
-        Reader: FnOnce() -> ReadFuture + Send + 'static,
-        Writer: Fn(T) -> WriteFuture + Send + Sync + 'static,
-        ReadFuture: Future<Output = R> + Send + 'static,
-        WriteFuture: Future<Output = R> + Send + 'static,
-    {
-        move |register: SideEffectRegistrar<'a>| {
-            let ((get_read, mut set_read), (write_state, set_write, _), is_first_build) =
-                register.register((future(), mutation(), is_first_build()));
-
-            if is_first_build {
-                set_read(read());
-            }
-            let state = match (write_state, get_read()) {
-                (AsyncState::Idle(_), AsyncState::Loading(prev)) => {
-                    AsyncPersistState::Loading(prev)
-                }
-                (AsyncState::Idle(_), AsyncState::Complete(data)) => {
-                    AsyncPersistState::Complete(data)
-                }
-
-                (AsyncState::Loading(None), read_state) => {
-                    AsyncPersistState::Loading(read_state.data())
-                }
-                (AsyncState::Loading(prev @ Some(_)), _) => AsyncPersistState::Loading(prev),
-
-                (AsyncState::Complete(data), _) => AsyncPersistState::Complete(data),
-
-                (_, AsyncState::Idle(_)) => {
-                    unreachable!("Read should never be idle")
-                }
-            };
-
-            let write = Arc::new(write);
-            let persist = move |new_data| {
-                let write = Arc::clone(&write);
-                set_write(async move { write(new_data).await });
-            };
-
-            (state, persist)
-        }
     }
 }

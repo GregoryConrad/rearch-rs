@@ -76,9 +76,17 @@ where
 
 /// Represents the type of a capsule's data;
 /// Capsules' data must be `Clone + Send + Sync + 'static`.
+/// You seldom need to reference this in your application's code;
+/// you are probably looking for [`CData`] instead.
 pub trait CapsuleData: Any + DynClone + Send + Sync + 'static {}
 impl<T: Clone + Send + Sync + 'static> CapsuleData for T {}
 dyn_clone::clone_trait_object!(CapsuleData);
+
+/// Shorthand for `Clone + Send + Sync + 'static`,
+/// which makes returning `impl Trait` far easier from capsules,
+/// where `Trait` is often a `Fn(Foo) -> Bar`.
+pub trait CData: Clone + Send + Sync + 'static {}
+impl<T: Clone + Send + Sync + 'static> CData for T {}
 
 /// The handle given to [`Capsule`]s in order to [`Capsule::build`] their [`Capsule::Data`].
 /// See [`CapsuleReader`] and [`SideEffectRegistrar`] for more.
@@ -487,9 +495,7 @@ mod tests {
     mod state_updates {
         use crate::*;
 
-        fn stateful(
-            CapsuleHandle { register, .. }: CapsuleHandle,
-        ) -> (u8, impl Fn(u8) + Clone + Send + Sync) {
+        fn stateful(CapsuleHandle { register, .. }: CapsuleHandle) -> (u8, impl CData + Fn(u8)) {
             let (state, set_state) = register.register(side_effects::state(0));
             (*state, set_state)
         }
@@ -534,12 +540,7 @@ mod tests {
     fn multiple_side_effect() {
         fn foo(
             CapsuleHandle { register, .. }: CapsuleHandle,
-        ) -> (
-            u8,
-            u8,
-            impl Fn(u8) + Clone + Send + Sync,
-            impl Fn(u8) + Clone + Send + Sync,
-        ) {
+        ) -> (u8, u8, impl CData + Fn(u8), impl CData + Fn(u8)) {
             let ((s1, ss1), (s2, ss2)) =
                 register.register((side_effects::state(0), side_effects::state(1)));
             (*s1, *s2, ss1, ss2)
@@ -565,7 +566,7 @@ mod tests {
 
             fn stateful(
                 CapsuleHandle { register, .. }: CapsuleHandle,
-            ) -> (u8, impl Fn(u8) + Clone + Send + Sync) {
+            ) -> (u8, impl CData + Fn(u8)) {
                 let (state, set_state) = register.register(side_effects::state(0));
                 (*state, set_state)
             }
@@ -609,7 +610,7 @@ mod tests {
 
             fn rebuildable(
                 CapsuleHandle { register, .. }: CapsuleHandle,
-            ) -> (impl Fn() + Clone + Send + Sync) {
+            ) -> (impl CData + Fn()) {
                 register.register(side_effects::rebuilder())
             }
 
@@ -640,9 +641,7 @@ mod tests {
     // C, D, E, G, H are idempotent. A, B, F are not.
     #[test]
     fn complex_dependency_graph() {
-        fn stateful_a(
-            CapsuleHandle { register, .. }: CapsuleHandle,
-        ) -> (u8, impl Fn(u8) + Clone + Send + Sync) {
+        fn stateful_a(CapsuleHandle { register, .. }: CapsuleHandle) -> (u8, impl CData + Fn(u8)) {
             let (state, set_state) = register.register(side_effects::state(0));
             (*state, set_state)
         }

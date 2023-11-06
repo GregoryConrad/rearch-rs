@@ -1,7 +1,7 @@
 use dyn_clone::DynClone;
 use std::{any::Any, cell::OnceCell};
 
-use crate::{SideEffect, EFFECT_FAILED_CAST_MSG};
+use crate::{CData, SideEffect, EFFECT_FAILED_CAST_MSG};
 
 pub trait SideEffectRebuilder:
     Fn(Box<dyn FnOnce(&mut Box<dyn Any + Send>)>) + Send + Sync + DynClone + 'static
@@ -47,13 +47,7 @@ impl<'a> SideEffectRegistrar<'a> {
     }
 
     /// The basic building block for all side effects.
-    pub(crate) fn raw<T>(
-        self,
-        initial: T,
-    ) -> (
-        &'a mut T,
-        impl Fn(Box<dyn FnOnce(&mut T)>) + Clone + Send + Sync + 'static,
-    )
+    pub(crate) fn raw<T>(self, initial: T) -> (&'a mut T, impl CData + Fn(Box<dyn FnOnce(&mut T)>))
     where
         T: Send + 'static,
     {

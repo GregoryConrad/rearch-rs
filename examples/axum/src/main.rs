@@ -36,7 +36,7 @@ use todo_db::*;
 mod todo_db {
     use std::sync::Arc;
 
-    use rearch::CapsuleHandle;
+    use rearch::{CData, CapsuleHandle};
     use redb::{Database, ReadOnlyTable, ReadableTable, Table, TableDefinition};
     use uuid::Uuid;
 
@@ -57,7 +57,7 @@ mod todo_db {
 
     fn with_read_txn_capsule<F, R>(
         CapsuleHandle { mut get, .. }: CapsuleHandle,
-    ) -> impl Fn(F) -> Result<R, redb::Error> + Send + Sync + Clone
+    ) -> impl CData + Fn(F) -> Result<R, redb::Error>
     where
         F: FnOnce(ReadOnlyTable<'_, u128, &str>) -> Result<R, redb::Error>,
     {
@@ -71,7 +71,7 @@ mod todo_db {
 
     fn with_write_txn_capsule<F, R>(
         CapsuleHandle { mut get, .. }: CapsuleHandle,
-    ) -> impl Fn(F) -> Result<R, redb::Error> + Send + Sync + Clone
+    ) -> impl CData + Fn(F) -> Result<R, redb::Error>
     where
         F: FnOnce(Table<'_, '_, u128, &str>) -> Result<R, redb::Error>,
     {
@@ -87,7 +87,7 @@ mod todo_db {
 
     pub(super) fn read_todo_capsule(
         CapsuleHandle { mut get, .. }: CapsuleHandle,
-    ) -> impl Fn(Uuid) -> Result<Option<String>, redb::Error> + Send + Sync + Clone {
+    ) -> impl CData + Fn(Uuid) -> Result<Option<String>, redb::Error> {
         let with_txn = get.get(with_read_txn_capsule);
         move |uuid| {
             with_txn(move |table| {
@@ -99,7 +99,7 @@ mod todo_db {
 
     pub(super) fn create_todo_capsule(
         CapsuleHandle { mut get, .. }: CapsuleHandle,
-    ) -> impl Fn(String) -> Result<TodoWithId, redb::Error> + Send + Sync + Clone {
+    ) -> impl CData + Fn(String) -> Result<TodoWithId, redb::Error> {
         let with_txn = get.get(with_write_txn_capsule);
         move |content| {
             with_txn(move |mut table| {
@@ -112,7 +112,7 @@ mod todo_db {
 
     pub(super) fn delete_todo_capsule(
         CapsuleHandle { mut get, .. }: CapsuleHandle,
-    ) -> impl Fn(Uuid) -> Result<Option<String>, redb::Error> + Send + Sync + Clone {
+    ) -> impl CData + Fn(Uuid) -> Result<Option<String>, redb::Error> {
         let with_txn = get.get(with_write_txn_capsule);
         move |uuid| {
             with_txn(move |mut table| {
@@ -124,7 +124,7 @@ mod todo_db {
 
     pub(super) fn list_todos_capsule(
         CapsuleHandle { mut get, .. }: CapsuleHandle,
-    ) -> impl Fn() -> Result<Vec<TodoWithId>, redb::Error> + Send + Sync + Clone {
+    ) -> impl CData + Fn() -> Result<Vec<TodoWithId>, redb::Error> {
         let with_txn = get.get(with_read_txn_capsule);
         move || {
             with_txn(|table| {

@@ -1,0 +1,21 @@
+[package]
+name = "example-axum"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+authors.workspace = true
+readme.workspace = true
+
+[dependencies]
+rearch = { workspace = true }
+axum = "0.6.*"
+redb = "1.*"
+serde = { version = "1.*", features = ["derive"] }
+tokio = { version = "1.*", features = ["full"] }
+uuid = { version = "1.*", features = ["v4", "serde"] }

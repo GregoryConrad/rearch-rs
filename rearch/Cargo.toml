@@ -18,16 +18,12 @@ concread = { version = "0.4.*", default-features = false, features = ["maps"] }
 dyn-clone = "1.*"
 paste = "1.*"
 log = { version = "0.4.*", optional = true }
-tokio = { version = "1.*", default-features = false, features = ["rt"], optional = true }
 
 [features]
 default = []
 
 # Enable logging with `log`
 logging = ["dep:log"]
-
-# Enables `Future`-based builtin side effects with tokio
-tokio-side-effects = ["dep:tokio"]
 
 # Enables the cleaner/better api, but unfortunately requires nightly
 better-api = []

@@ -39,9 +39,7 @@ Define your "capsules" (en-_capsulated_ pieces of state) at the top level:
 // in addition to using a large variety of side effects.
 
 // This capsule provides the count and a way to increment that count.
-fn count_manager(
-    CapsuleHandle { register, .. }: CapsuleHandle,
-) -> (u8, impl Fn() + Clone + Send + Sync) {
+fn count_manager(CapsuleHandle { register, .. }: CapsuleHandle) -> (u8, impl CData + Fn()) {
     let (count, set_count) = register(side_effects::state(0));
     let increment_count = || set_count(count + 1);
     (*count, increment_count)
