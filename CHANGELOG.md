@@ -2,6 +2,12 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 - - -
+## 0.2.1 - 2023-11-06
+#### Bug Fixes
+- fix versioning issues - (e9e7041) - Gregory Conrad
+
+- - -
+
 ## 0.2.0 - 2023-11-06
 #### Documentation
 - add examples and reword README - (0b8029f) - Gregory Conrad
