@@ -3,7 +3,7 @@ members = ["rearch", "rearch-*", "examples/*"]
 resolver = "2"
 
 [workspace.package]
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 license = "MIT"
 description = "Re-imagined approach to application design and architecture"
@@ -16,5 +16,5 @@ authors = ["Gregory Conrad <contact@gsconrad.com>"]
 readme = "README.md"
 
 [workspace.dependencies]
-rearch-macros = { path = "rearch-macros" }
-rearch = { path = "rearch" }
+rearch-macros = { path = "rearch-macros", version = "0.2.*" }
+rearch = { path = "rearch", version = "0.2.*" }
