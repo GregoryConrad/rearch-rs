@@ -3,6 +3,7 @@ use quote::{format_ident, quote};
 
 /// Macro for handling some implementation boilerplate; do not use.
 #[proc_macro]
+#[allow(clippy::missing_panics_doc)]
 pub fn generate_tuple_side_effect_impl(input: TokenStream) -> TokenStream {
     let types = input
         .into_iter()

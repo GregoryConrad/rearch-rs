@@ -12,6 +12,9 @@ categories.workspace = true
 authors.workspace = true
 readme.workspace = true
 
+[lints]
+workspace = true
+
 [dependencies]
 rearch = { workspace = true }
 axum = "0.6.*"

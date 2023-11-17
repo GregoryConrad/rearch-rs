@@ -57,6 +57,7 @@ impl<'a> ContainerWriteTxn<'a> {
 }
 
 impl ContainerWriteTxn<'_> {
+    #[allow(clippy::missing_panics_doc)]
     pub fn read_or_init<C: Capsule>(&mut self, capsule: C) -> C::Data {
         let id = TypeId::of::<C>();
         if !self.data.contains_key(&id) {

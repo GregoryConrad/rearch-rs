@@ -1,17 +1,3 @@
-#![warn(
-    clippy::all,
-    clippy::cargo,
-    clippy::complexity,
-    clippy::correctness,
-    clippy::nursery,
-    clippy::pedantic,
-    clippy::perf,
-    clippy::style,
-    clippy::suspicious,
-    clippy::clone_on_ref_ptr,
-    clippy::unwrap_used
-)]
-
 use std::{cell::RefCell, future::Future, rc::Rc, sync::Arc};
 
 use rearch::{side_effects::*, SideEffect, SideEffectRegistrar};

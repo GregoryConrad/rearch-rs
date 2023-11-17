@@ -18,3 +18,19 @@ readme = "README.md"
 [workspace.dependencies]
 rearch-macros = { path = "rearch-macros", version = "0.2.*" }
 rearch = { path = "rearch", version = "0.2.*" }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = "warn"
+cargo = "warn"
+complexity = "warn"
+correctness = "warn"
+nursery = "warn"
+pedantic = "warn"
+perf = "warn"
+style = "warn"
+suspicious = "warn"
+clone_on_ref_ptr = "warn"
+unwrap_used = "warn"

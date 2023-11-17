@@ -1,16 +1,3 @@
-#![warn(
-    clippy::all,
-    clippy::cargo,
-    clippy::complexity,
-    clippy::correctness,
-    clippy::nursery,
-    clippy::pedantic,
-    clippy::perf,
-    clippy::style,
-    clippy::suspicious,
-    clippy::clone_on_ref_ptr,
-    clippy::unwrap_used
-)]
 #![feature(trait_upcasting)]
 #![cfg_attr(feature = "better-api", feature(unboxed_closures, fn_traits))]
 
