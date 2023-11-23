@@ -2,6 +2,16 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 - - -
+## 0.3.0 - 2023-11-23
+#### Features
+- set MSRV to 1.76.0 - (2fbad41) - Gregory Conrad
+#### Miscellaneous Chores
+- version separation and bump - (970cd0b) - Gregory Conrad
+#### Style
+- update to use Rust 1.74 workspace lints - (dde160e) - Gregory Conrad
+
+- - -
+
 ## 0.2.1 - 2023-11-06
 #### Bug Fixes
 - fix versioning issues - (e9e7041) - Gregory Conrad
