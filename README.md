@@ -74,9 +74,8 @@ Also, there is some WIP [documentation] that will help you learn the core concep
 
 
 ## Minimum Supported Rust Version (MSRV)
-The MSRV is currently nightly, at least until `trait_upcasting` stabilizes
-(which should be fairly soon based on the [tracking GitHub issue](https://github.com/rust-lang/rust/issues/65991)).
-Once it does stabilize, the MSRV will be the first stable Rust release with `trait_upcasting`.
+The MSRV is currently 1.76.0 due to ReArch's dependency on
+[`trait_upcasting`](https://github.com/rust-lang/rust/issues/65991).
 
 The MSRV will only increment on minor or major changes (minor/major in terms of semver).
 
@@ -90,7 +89,7 @@ and this will no longer be feature-gated.
 
 
 ## Help Wanted!
-As much as I have done with rearch, it always seems like there is more to do.
+As much as I have done with ReArch, it always seems like there is more to do.
 One person can only do so much!
 
 If you would like to sponsor me to continue my work, thank you!

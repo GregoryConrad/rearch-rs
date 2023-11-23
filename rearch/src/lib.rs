@@ -1,4 +1,3 @@
-#![feature(trait_upcasting)]
 #![cfg_attr(feature = "better-api", feature(unboxed_closures, fn_traits))]
 
 use dyn_clone::DynClone;
