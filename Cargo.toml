@@ -3,7 +3,6 @@ members = ["rearch", "rearch-*", "examples/*"]
 resolver = "2"
 
 [workspace.package]
-version = "0.2.1"
 edition = "2021"
 license = "MIT"
 description = "Re-imagined approach to application design and architecture"
@@ -17,7 +16,7 @@ readme = "README.md"
 
 [workspace.dependencies]
 rearch-macros = { path = "rearch-macros", version = "0.2.*" }
-rearch = { path = "rearch", version = "0.2.*" }
+rearch = { path = "rearch", version = "0.3.*" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
