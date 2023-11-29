@@ -1,6 +1,6 @@
 use std::{cell::RefCell, future::Future, rc::Rc, sync::Arc};
 
-use rearch::{side_effects::*, SideEffect, SideEffectRegistrar};
+use rearch::{side_effects, SideEffect, SideEffectRegistrar};
 
 struct FunctionalDrop<F: FnOnce()>(Option<F>);
 impl<F: FnOnce()> Drop for FunctionalDrop<F> {
@@ -21,8 +21,7 @@ pub enum AsyncState<T> {
 impl<T> AsyncState<T> {
     pub fn data(self) -> Option<T> {
         match self {
-            Self::Idle(previous_data) => previous_data,
-            Self::Loading(previous_data) => previous_data,
+            Self::Idle(previous_data) | Self::Loading(previous_data) => previous_data,
             Self::Complete(data) => Some(data),
         }
     }
@@ -43,6 +42,7 @@ impl<T> AsyncPersistState<T> {
     }
 }
 
+#[must_use]
 pub fn future<'a, T, F>(
 ) -> impl SideEffect<'a, Api = (impl Fn() -> AsyncState<T> + 'a, impl FnMut(F) + 'a)>
 where
@@ -50,8 +50,10 @@ where
     F: Future<Output = T> + Send + 'static,
 {
     move |register: SideEffectRegistrar<'a>| {
-        let ((state, set_state), mut on_change) =
-            register.register((state(AsyncState::Idle(None)), run_on_change()));
+        let ((state, set_state), mut on_change) = register.register((
+            side_effects::state(AsyncState::Idle(None)),
+            side_effects::run_on_change(),
+        ));
         let state = Rc::new(RefCell::new(state));
         let get = {
             let state = Rc::clone(&state);
@@ -73,6 +75,7 @@ where
     }
 }
 
+#[must_use]
 pub fn mutation<'a, T, F>() -> impl SideEffect<
     'a,
     Api = (
@@ -87,9 +90,9 @@ where
 {
     move |register: SideEffectRegistrar<'a>| {
         let ((state, rebuild), (_, on_change)) = register.register((
-            raw(AsyncState::Idle(None)),
+            side_effects::raw(AsyncState::Idle(None)),
             // This immitates run_on_change, but for external use (outside of build)
-            state(FunctionalDrop(None)),
+            side_effects::state(FunctionalDrop(None)),
         ));
 
         let state = state.clone();
@@ -135,22 +138,20 @@ where
 {
     move |register: SideEffectRegistrar<'a>| {
         let ((get_read, mut set_read), (write_state, set_write, _), is_first_build) =
-            register.register((future(), mutation(), is_first_build()));
+            register.register((future(), mutation(), side_effects::is_first_build()));
 
         if is_first_build {
             set_read(read());
         }
         let state = match (write_state, get_read()) {
-            (AsyncState::Idle(_), AsyncState::Loading(prev)) => AsyncPersistState::Loading(prev),
-            (AsyncState::Idle(_), AsyncState::Complete(data)) => AsyncPersistState::Complete(data),
-
+            (AsyncState::Idle(_), AsyncState::Loading(prev))
+            | (AsyncState::Loading(prev @ Some(_)), _) => AsyncPersistState::Loading(prev),
+            (AsyncState::Idle(_), AsyncState::Complete(data)) | (AsyncState::Complete(data), _) => {
+                AsyncPersistState::Complete(data)
+            }
             (AsyncState::Loading(None), read_state) => {
                 AsyncPersistState::Loading(read_state.data())
             }
-            (AsyncState::Loading(prev @ Some(_)), _) => AsyncPersistState::Loading(prev),
-
-            (AsyncState::Complete(data), _) => AsyncPersistState::Complete(data),
-
             (_, AsyncState::Idle(_)) => {
                 unreachable!("Read should never be idle")
             }
