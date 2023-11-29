@@ -1,6 +1,5 @@
 [package]
 name = "example-axum"
-version = "0.2.1"
 edition.workspace = true
 license.workspace = true
 description.workspace = true
