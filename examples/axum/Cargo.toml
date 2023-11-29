@@ -1,5 +1,7 @@
 [package]
 name = "example-axum"
+version = "0.3.0"
+publish = false
 edition.workspace = true
 license.workspace = true
 description.workspace = true
@@ -16,7 +18,7 @@ workspace = true
 
 [dependencies]
 rearch = { workspace = true }
-axum = "0.6.*"
+axum = "0.7.*"
 redb = "1.*"
 serde = { version = "1.*", features = ["derive"] }
 tokio = { version = "1.*", features = ["full"] }

@@ -1,4 +1,4 @@
-use std::net::SocketAddr;
+#![allow(clippy::unwrap_used, clippy::redundant_pub_crate)]
 
 use axum::{
     extract::{Path, State},
@@ -18,11 +18,8 @@ async fn main() {
         .route("/todos/:id", get(read_todo).delete(delete_todo))
         .with_state(Container::new());
 
-    let addr = SocketAddr::from(([0, 0, 0, 0], 8080));
-    axum::Server::bind(&addr)
-        .serve(app.into_make_service())
-        .await
-        .unwrap();
+    let listener = tokio::net::TcpListener::bind("0.0.0.0:8080").await.unwrap();
+    axum::serve(listener, app).await.unwrap();
 }
 
 #[derive(Serialize)]
@@ -32,7 +29,6 @@ struct TodoWithId {
 }
 
 // We define our todo db capsules here
-use todo_db::*;
 mod todo_db {
     use std::sync::Arc;
 
@@ -143,38 +139,32 @@ mod todo_db {
 }
 
 async fn list_todos(State(container): State<Container>) -> Result<Json<Vec<TodoWithId>>, AppError> {
-    let todos = container.read(list_todos_capsule)()?;
-    Ok(Json(todos))
+    container.read(todo_db::list_todos_capsule)()
+        .map(Json)
+        .map_err(Into::into)
 }
 
 async fn create_todo(
     State(container): State<Container>,
     content: String,
 ) -> Result<Json<TodoWithId>, AppError> {
-    let todo = container.read(create_todo_capsule)(content)?;
-    Ok(Json(todo))
+    container.read(todo_db::create_todo_capsule)(content)
+        .map(Json)
+        .map_err(Into::into)
 }
 
 async fn read_todo(
     State(container): State<Container>,
     Path(uuid): Path<Uuid>,
 ) -> Result<String, AppError> {
-    let todo = container.read(read_todo_capsule)(uuid)?;
-    match todo {
-        Some(todo) => Ok(todo),
-        None => Err(AppError::TodoNotFound),
-    }
+    container.read(todo_db::read_todo_capsule)(uuid)?.ok_or(AppError::TodoNotFound)
 }
 
 async fn delete_todo(
     State(container): State<Container>,
     Path(uuid): Path<Uuid>,
 ) -> Result<String, AppError> {
-    let todo = container.read(delete_todo_capsule)(uuid)?;
-    match todo {
-        Some(todo) => Ok(todo),
-        None => Err(AppError::TodoNotFound),
-    }
+    container.read(todo_db::delete_todo_capsule)(uuid)?.ok_or(AppError::TodoNotFound)
 }
 
 enum AppError {
@@ -184,17 +174,17 @@ enum AppError {
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         match self {
-            AppError::Redb(e) => (
+            Self::Redb(e) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!("Database operation failed: {e}"),
             ),
-            AppError::TodoNotFound => (StatusCode::NOT_FOUND, "Todo not found".to_owned()),
+            Self::TodoNotFound => (StatusCode::NOT_FOUND, "Todo not found".to_owned()),
         }
         .into_response()
     }
 }
 impl From<redb::Error> for AppError {
     fn from(err: redb::Error) -> Self {
-        Self::Redb(err.into())
+        Self::Redb(err)
     }
 }
