@@ -15,8 +15,8 @@ authors = ["Gregory Conrad <contact@gsconrad.com>"]
 readme = "README.md"
 
 [workspace.dependencies]
-rearch-macros = { path = "rearch-macros", version = "0.2.*" }
-rearch = { path = "rearch", version = "0.3.*" }
+rearch-macros = { path = "rearch-macros", version = "0.4.*" }
+rearch = { path = "rearch", version = "0.4.*" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
