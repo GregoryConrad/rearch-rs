@@ -1,6 +1,74 @@
 
 
+## v0.4.1 (2023-11-30)
+
+### New Features
+
+ - <csr-id-1dfa2d4c9e4e520798ba2d62ac3d06cf54247674/> add optional eq rebuild optimization
+
+### Bug Fixes
+
+ - <csr-id-f1efbcfbef09b2c36bf39120afbc60c0400c92ce/> make the as_listener side effect register ()
+
+### Reverted
+
+ - <csr-id-4427dd0786b73cfb4b760d4ac1f5525171f335e4/> switch style back to rust stable
+
+### Style
+
+ - <csr-id-762eb7bab9fcace1144a77697719a06b290153ff/> fix code formatting
+
+### Commit Statistics
+
+<csr-read-only-do-not-edit/>
+
+ - 4 commits contributed to the release.
+ - 4 commits were understood as [conventional](https://www.conventionalcommits.org).
+ - 0 issues like '(#ID)' were seen in commit messages
+
+### Commit Details
+
+<csr-read-only-do-not-edit/>
+
+<details><summary>view details</summary>
+
+ * **Uncategorized**
+    - Switch style back to rust stable ([`4427dd0`](https://github.com/GregoryConrad/rearch-rs/commit/4427dd0786b73cfb4b760d4ac1f5525171f335e4))
+    - Make the as_listener side effect register () ([`f1efbcf`](https://github.com/GregoryConrad/rearch-rs/commit/f1efbcfbef09b2c36bf39120afbc60c0400c92ce))
+    - Fix code formatting ([`762eb7b`](https://github.com/GregoryConrad/rearch-rs/commit/762eb7bab9fcace1144a77697719a06b290153ff))
+    - Add optional eq rebuild optimization ([`1dfa2d4`](https://github.com/GregoryConrad/rearch-rs/commit/1dfa2d4c9e4e520798ba2d62ac3d06cf54247674))
+</details>
+
 ## v0.4.0 (2023-11-29)
+
+<csr-id-918a68fc8436e2a708bcde9e80b6e2eb5df8d4be/>
+<csr-id-b606de4f60542de4c1ed7ad22cbf19ff1e10905a/>
+<csr-id-970cd0bd5c82784b26dde1b169c3205593be76a1/>
+<csr-id-55f7b69a43d3c47cbcccfefe3e290a32d3e955bd/>
+<csr-id-ddb0cac0383aed6263ce4db04f3b3c982c838718/>
+<csr-id-91fc15e7cdd460226bac37650bb8648179c7438a/>
+<csr-id-97afad4fca9a0bd4b25277da1826d3a32f2e05ab/>
+<csr-id-7d6e2e823484aaee3348edcc70e3082c84950fcd/>
+<csr-id-e23e89d7bcde38d211aeae3ba57a14ab74794a81/>
+<csr-id-bd902097056a3970ce0c8314ead48ad7627d97e7/>
+<csr-id-b3186e4208c4a03abd6c11ca17b38a1d3029fb62/>
+<csr-id-9cb2d62cdcf5c6331bb9947081c02f3f7943a0f8/>
+<csr-id-df406f1347039a1ce6d0ae0791b15a7bc7a6869b/>
+<csr-id-56837907b57d9fbd14b5ce839327e35de6b9b39f/>
+<csr-id-c0012208413451a922faa38244555ece9db1763e/>
+<csr-id-16d03972355ff974b702e51b6aac279d40587f85/>
+<csr-id-b216db9b8a1effb6fc30b4f38d0a76a97e863107/>
+<csr-id-92c7ff70c23167405f27817acd19396dc112b612/>
+<csr-id-dde160ee14fc78c4a9b47b8ef38ff5bf7c272203/>
+<csr-id-86582feb500dd369d97f1ac1fc52b5ced9d06bcb/>
+<csr-id-a0c98ef1104e747e2d40e546dfe9e164ba18b41b/>
+<csr-id-a96514a07e6f346b8664f8811b727d329fd6c669/>
+<csr-id-2f290f9915106bfb73e5fa14b58dba16ded4ab3b/>
+<csr-id-63e800cb55a4c192c0dc4b0c513cd7fa50c2669e/>
+<csr-id-8673866d7d1a45a94a0b93315983ea648d2195e7/>
+<csr-id-b2b5e92c28507773f88155c9598486352d10b0ee/>
+<csr-id-951375b2232e982ec2c50de72c72759458b98eb7/>
+<csr-id-09d13cab87f0737b679787de8151e990c7c75df2/>
 
 ### Chore
 
@@ -106,7 +174,7 @@
 
 <csr-read-only-do-not-edit/>
 
- - 67 commits contributed to the release over the course of 174 calendar days.
+ - 68 commits contributed to the release over the course of 174 calendar days.
  - 67 commits were understood as [conventional](https://www.conventionalcommits.org).
  - 0 issues like '(#ID)' were seen in commit messages
 
@@ -117,6 +185,7 @@
 <details><summary>view details</summary>
 
  * **Uncategorized**
+    - Release rearch-macros v0.4.0, rearch v0.4.0, rearch-tokio v0.4.0 ([`f1f5fe8`](https://github.com/GregoryConrad/rearch-rs/commit/f1f5fe8d9d5d66f8621bfbc599245a49b8767c04))
     - Touch new changelogs ([`918a68f`](https://github.com/GregoryConrad/rearch-rs/commit/918a68fc8436e2a708bcde9e80b6e2eb5df8d4be))
     - Version bumps in prep for smart-release ([`b606de4`](https://github.com/GregoryConrad/rearch-rs/commit/b606de4f60542de4c1ed7ad22cbf19ff1e10905a))
     - Version separation and bump ([`970cd0b`](https://github.com/GregoryConrad/rearch-rs/commit/970cd0bd5c82784b26dde1b169c3205593be76a1))
