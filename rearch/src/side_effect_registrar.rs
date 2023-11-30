@@ -58,15 +58,14 @@ impl<'a> SideEffectRegistrar<'a> {
             .expect(PREVIOUS_INIT_FAILED_MSG)
             .downcast_mut::<T>()
             .unwrap_or_else(|| panic!("{}", EFFECT_FAILED_CAST_MSG));
-        let rebuild =
-            move |mutation: Box<dyn FnOnce(&mut T)>| {
-                (self.rebuilder)(Box::new(|data| {
-                    let data = data
-                        .downcast_mut::<T>()
-                        .unwrap_or_else(|| panic!("{}", EFFECT_FAILED_CAST_MSG));
-                    mutation(data);
-                }));
-            };
+        let rebuild = move |mutation: Box<dyn FnOnce(&mut T)>| {
+            (self.rebuilder)(Box::new(|data| {
+                let data = data
+                    .downcast_mut::<T>()
+                    .unwrap_or_else(|| panic!("{}", EFFECT_FAILED_CAST_MSG));
+                mutation(data);
+            }));
+        };
         (data, rebuild)
     }
 }

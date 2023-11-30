@@ -15,19 +15,18 @@ pub fn generate_tuple_side_effect_impl(input: TokenStream) -> TokenStream {
         .map(|ident| format_ident!("{ident}"))
         .collect::<Vec<_>>();
     let once_cell_inits = (0..types.len()).map(|_| quote! { OnceCell::new() });
-    let individual_apis =
-        (0..types.len()).map(syn::Index::from).map(|i| {
-            quote! {
-                self.#i.build(SideEffectRegistrar::new(&mut all_states.#i, {
-                    let rebuild_all = rebuild_all.clone();
-                    Box::new(move |mutation: Box<dyn FnOnce(&mut Box<dyn Any + Send>)>| {
-                        rebuild_all(Box::new(move |all_states| {
-                            mutation(all_states.#i.get_mut().expect(EFFECT_FAILED_CAST_MSG));
-                        }));
-                    })
-                }))
-            }
-        });
+    let individual_apis = (0..types.len()).map(syn::Index::from).map(|i| {
+        quote! {
+            self.#i.build(SideEffectRegistrar::new(&mut all_states.#i, {
+                let rebuild_all = rebuild_all.clone();
+                Box::new(move |mutation: Box<dyn FnOnce(&mut Box<dyn Any + Send>)>| {
+                    rebuild_all(Box::new(move |all_states| {
+                        mutation(all_states.#i.get_mut().expect(EFFECT_FAILED_CAST_MSG));
+                    }));
+                })
+            }))
+        }
+    });
     let effect_impl = quote! {
         impl<'a, #(#types: SideEffect<'a>),*> SideEffect<'a> for (#(#types),*) {
             type Api = (#(#types::Api),*);
