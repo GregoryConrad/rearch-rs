@@ -9,9 +9,7 @@ pub fn raw<'a, T: Send + 'static>(
 }
 
 #[must_use]
-pub fn as_listener<'a>() -> impl SideEffect<'a, Api = ()> {
-    |_: SideEffectRegistrar<'a>| {}
-}
+pub fn as_listener<'a>() -> impl SideEffect<'a, Api = ()> {} // returns (), the no-op side effect
 
 pub fn state<'a, T: Send + 'static>(
     initial: T,
