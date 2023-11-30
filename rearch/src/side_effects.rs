@@ -185,10 +185,11 @@ where
     move |register: SideEffectRegistrar<'a>| {
         let (state, set_state) = register.register(lazy_state(read));
         let write = Arc::new(write);
-        let persist = move |new_data| {
-            let persist_result = write(new_data);
-            set_state(persist_result);
-        };
+        let persist =
+            move |new_data| {
+                let persist_result = write(new_data);
+                set_state(persist_result);
+            };
         (&*state, persist)
     }
 }
