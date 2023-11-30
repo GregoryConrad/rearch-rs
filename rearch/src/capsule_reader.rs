@@ -45,13 +45,9 @@ impl<'scope, 'total> CapsuleReader<'scope, 'total> {
                     });
                 }
 
-                // Get the value (and make sure the other manager is initialized!)
+                // Adding dep relationship is after read_or_init to ensure manager is initialized
                 let data = txn.read_or_init(capsule);
-
-                // Take care of some dependency housekeeping
-                txn.node_or_panic(other).dependents.insert(this);
-                txn.node_or_panic(this).dependencies.insert(other);
-
+                txn.add_dependency_relationship(other, this);
                 data
             }
             CapsuleReader::Mock { mocks } => {

@@ -22,10 +22,6 @@ pub use txn::*;
 /// Capsules are blueprints for creating some immutable data
 /// and do not actually contain any data themselves.
 /// See the documentation for more.
-///
-// TODO(GregoryConrad): remove the following doc comment when this trait stabilizes.
-/// *DO NOT MANUALLY IMPLEMENT THIS TRAIT YOURSELF!*
-/// It is an internal implementation detail that will likely be changed or removed in the future.
 // - `Send` is required because `CapsuleManager` needs to store a copy of the capsule
 // - `'static` is required to store a copy of the capsule, and for TypeId::of()
 pub trait Capsule: Send + 'static {
@@ -45,8 +41,9 @@ pub trait Capsule: Send + 'static {
     /// Doing so will result in a deadlock.
     fn build(&self, handle: CapsuleHandle) -> Self::Data;
 
-    // TODO(GregoryConrad): the following eq method to prevent propagation when possible
-    // fn eq(old: &Self::Data, new: &Self::Data) -> bool;
+    /// Returns whether or not a capsule's old data and new data are equivalent
+    /// (and thus whether or not we can skip rebuilding dependents as an optimization).
+    fn eq(old: &Self::Data, new: &Self::Data) -> bool;
 }
 impl<T, F> Capsule for F
 where
@@ -57,6 +54,12 @@ where
 
     fn build(&self, handle: CapsuleHandle) -> Self::Data {
         self(handle)
+    }
+
+    // Unfortunately, negative trait impls don't exist yet.
+    // If they did, this would have a separate impl for PartialEq/Eq.
+    fn eq(_old: &Self::Data, _new: &Self::Data) -> bool {
+        false
     }
 }
 
@@ -254,7 +257,7 @@ impl Drop for ListenerHandle {
         if let Some(store) = self.store.upgrade() {
             // Note: The node is guaranteed to be in the graph here since it is a listener.
             let rebuilder = CapsuleRebuilder(Weak::clone(&self.store));
-            store.with_write_txn(rebuilder, |txn| txn.dispose_single_node(self.id));
+            store.with_write_txn(rebuilder, |txn| txn.dispose_node(self.id));
         }
     }
 }
@@ -328,7 +331,7 @@ impl ContainerStore {
 #[derive(Clone)]
 struct CapsuleRebuilder(Weak<ContainerStore>);
 impl CapsuleRebuilder {
-    fn rebuild(&self, id: TypeId, mutation: impl FnOnce(&mut CapsuleManager)) {
+    fn rebuild(&self, id: TypeId, mutation: impl FnOnce(&mut OnceCell<Box<dyn Any + Send>>)) {
         #[allow(clippy::option_if_let_else)]
         if let Some(store) = self.0.upgrade() {
             #[cfg(feature = "logging")]
@@ -340,7 +343,7 @@ impl CapsuleRebuilder {
             store.with_write_txn(self.clone(), |txn| {
                 // We have the txn now, so that means we also hold the data & nodes lock.
                 // Thus, this is where we should run the supplied mutation.
-                mutation(txn.node_or_panic(id));
+                mutation(txn.side_effect(id));
                 txn.build_capsule_or_panic(id);
             });
         } else {
@@ -367,7 +370,7 @@ struct CapsuleManager {
     side_effect: Option<OnceCell<Box<dyn Any + Send>>>,
     dependencies: HashSet<TypeId>,
     dependents: HashSet<TypeId>,
-    build: fn(&mut ContainerWriteTxn),
+    build: fn(&mut ContainerWriteTxn) -> bool,
 }
 
 impl CapsuleManager {
@@ -381,23 +384,20 @@ impl CapsuleManager {
         }
     }
 
-    fn build<C: Capsule>(txn: &mut ContainerWriteTxn) {
+    // Builds a capsule's new data and puts it into the txn, returning true when the data changes.
+    fn build<C: Capsule>(txn: &mut ContainerWriteTxn) -> bool {
         let id = TypeId::of::<C>();
 
         #[cfg(feature = "logging")]
         log::trace!("Building {} ({:?})", std::any::type_name::<C>(), id);
 
-        // Take ownership over a few fields from the manager
-        let manager = txn.node_or_panic(id);
-        let capsule = std::mem::take(&mut manager.capsule).expect(EXCLUSIVE_OWNER_MSG);
-        let mut side_effect = std::mem::take(&mut manager.side_effect).expect(EXCLUSIVE_OWNER_MSG);
-
         let new_data = {
+            let (capsule, mut side_effect) = txn.take_capsule_and_side_effect(id);
+
             let rebuilder = {
                 let rebuilder = txn.rebuilder.clone();
                 Box::new(move |mutation: Box<dyn FnOnce(&mut Box<_>)>| {
-                    rebuilder.rebuild(id, |manager| {
-                        let effect = manager.side_effect.as_mut().expect(EXCLUSIVE_OWNER_MSG);
+                    rebuilder.rebuild(id, |effect| {
                         let effect = effect.get_mut().expect(concat!(
                             "The side effect must've been previously initialized ",
                             "in order to use the rebuilder"
@@ -407,21 +407,32 @@ impl CapsuleManager {
                 })
             };
 
-            capsule
+            let new_data = capsule
                 .downcast_ref::<C>()
                 .expect("Types should be properly enforced due to generics")
                 .build(CapsuleHandle {
                     get: CapsuleReader::new(id, txn),
                     register: SideEffectRegistrar::new(&mut side_effect, rebuilder),
-                })
+                });
+
+            txn.yield_capsule_and_side_effect(id, capsule, side_effect);
+
+            new_data
         };
 
-        // Give manager ownership back over the fields we temporarily took
-        let manager = txn.node_or_panic(id);
-        manager.capsule = Some(capsule);
-        manager.side_effect = Some(side_effect);
+        let did_change = txn
+            .data
+            .remove(&id)
+            .map(|old_data| {
+                let any: Box<dyn Any> = old_data;
+                *any.downcast::<C::Data>()
+                    .expect("Types should be properly enforced due to generics")
+            })
+            .map_or(true, |old_data| !C::eq(&old_data, &new_data));
 
         txn.data.insert(id, Box::new(new_data));
+
+        did_change
     }
 
     fn is_idempotent(&self) -> bool {
@@ -430,10 +441,6 @@ impl CapsuleManager {
             .expect(EXCLUSIVE_OWNER_MSG)
             .get()
             .is_none()
-    }
-
-    fn is_disposable(&self) -> bool {
-        self.is_idempotent() && self.dependents.is_empty()
     }
 }
 
@@ -617,6 +624,154 @@ mod tests {
             assert_eq!(*states, vec![true, false])
         }
     */
+
+    #[test]
+    fn eq_check_skips_unneeded_rebuilds() {
+        use std::collections::HashMap;
+        static BUILDS: Mutex<OnceCell<HashMap<TypeId, u32>>> = Mutex::new(OnceCell::new());
+        fn increment_build_count<C: Capsule>(_capsule: C) {
+            let mut cell = BUILDS.lock().unwrap();
+            cell.get_or_init(HashMap::new);
+            let entry = cell.get_mut().unwrap().entry(TypeId::of::<C>());
+            *entry.or_default() += 1;
+        }
+        fn get_build_count<C: Capsule>(_capsule: C) -> u32 {
+            *BUILDS
+                .lock()
+                .unwrap()
+                .get()
+                .unwrap()
+                .get(&TypeId::of::<C>())
+                .unwrap()
+        }
+
+        fn stateful(CapsuleHandle { register, .. }: CapsuleHandle) -> (u32, impl CData + Fn(u32)) {
+            increment_build_count(stateful);
+            let (state, set_state) = register.register(side_effects::state(0));
+            (*state, set_state)
+        }
+
+        struct UnchangingIdempotentDep;
+        impl Capsule for UnchangingIdempotentDep {
+            type Data = u32;
+
+            fn build(&self, CapsuleHandle { mut get, .. }: CapsuleHandle) -> Self::Data {
+                increment_build_count(UnchangingIdempotentDep);
+                _ = get.get(stateful);
+                0
+            }
+
+            fn eq(old: &Self::Data, new: &Self::Data) -> bool {
+                old == new
+            }
+        }
+
+        struct UnchangingWatcher;
+        impl Capsule for UnchangingWatcher {
+            type Data = u32;
+
+            fn build(&self, CapsuleHandle { mut get, .. }: CapsuleHandle) -> Self::Data {
+                increment_build_count(UnchangingWatcher);
+                get.get(UnchangingIdempotentDep)
+            }
+
+            fn eq(old: &Self::Data, new: &Self::Data) -> bool {
+                old == new
+            }
+        }
+
+        struct ChangingIdempotentDep;
+        impl Capsule for ChangingIdempotentDep {
+            type Data = u32;
+
+            fn build(&self, CapsuleHandle { mut get, .. }: CapsuleHandle) -> Self::Data {
+                increment_build_count(ChangingIdempotentDep);
+                get.get(stateful).0
+            }
+
+            fn eq(old: &Self::Data, new: &Self::Data) -> bool {
+                old == new
+            }
+        }
+
+        struct ChangingWatcher;
+        impl Capsule for ChangingWatcher {
+            type Data = u32;
+
+            fn build(&self, CapsuleHandle { mut get, .. }: CapsuleHandle) -> Self::Data {
+                increment_build_count(ChangingWatcher);
+                get.get(ChangingIdempotentDep)
+            }
+
+            fn eq(old: &Self::Data, new: &Self::Data) -> bool {
+                old == new
+            }
+        }
+
+        fn impure_sink(CapsuleHandle { mut get, register }: CapsuleHandle) {
+            register.register(side_effects::as_listener());
+            _ = get.get(ChangingWatcher);
+            _ = get.get(UnchangingWatcher);
+        }
+
+        let container = Container::new();
+
+        assert_eq!(container.read(UnchangingWatcher), 0);
+        assert_eq!(container.read(ChangingWatcher), 0);
+        assert_eq!(get_build_count(stateful), 1);
+        assert_eq!(get_build_count(UnchangingIdempotentDep), 1);
+        assert_eq!(get_build_count(ChangingIdempotentDep), 1);
+        assert_eq!(get_build_count(UnchangingWatcher), 1);
+        assert_eq!(get_build_count(ChangingWatcher), 1);
+
+        container.read(stateful).1(0);
+        assert_eq!(get_build_count(stateful), 2);
+        assert_eq!(get_build_count(UnchangingIdempotentDep), 1);
+        assert_eq!(get_build_count(ChangingIdempotentDep), 1);
+        assert_eq!(get_build_count(UnchangingWatcher), 1);
+        assert_eq!(get_build_count(ChangingWatcher), 1);
+
+        assert_eq!(container.read(UnchangingWatcher), 0);
+        assert_eq!(container.read(ChangingWatcher), 0);
+        assert_eq!(get_build_count(stateful), 2);
+        assert_eq!(get_build_count(UnchangingIdempotentDep), 2);
+        assert_eq!(get_build_count(ChangingIdempotentDep), 2);
+        assert_eq!(get_build_count(UnchangingWatcher), 2);
+        assert_eq!(get_build_count(ChangingWatcher), 2);
+
+        container.read(stateful).1(1);
+        assert_eq!(get_build_count(stateful), 3);
+        assert_eq!(get_build_count(UnchangingIdempotentDep), 2);
+        assert_eq!(get_build_count(ChangingIdempotentDep), 2);
+        assert_eq!(get_build_count(UnchangingWatcher), 2);
+        assert_eq!(get_build_count(ChangingWatcher), 2);
+
+        assert_eq!(container.read(UnchangingWatcher), 0);
+        assert_eq!(container.read(ChangingWatcher), 1);
+        assert_eq!(get_build_count(stateful), 3);
+        assert_eq!(get_build_count(UnchangingIdempotentDep), 3);
+        assert_eq!(get_build_count(ChangingIdempotentDep), 3);
+        assert_eq!(get_build_count(UnchangingWatcher), 3);
+        assert_eq!(get_build_count(ChangingWatcher), 3);
+
+        // Disable the idempotent gc
+        container.read(impure_sink);
+
+        container.read(stateful).1(2);
+        assert_eq!(get_build_count(stateful), 4);
+        assert_eq!(get_build_count(UnchangingIdempotentDep), 4);
+        assert_eq!(get_build_count(ChangingIdempotentDep), 4);
+        assert_eq!(get_build_count(UnchangingWatcher), 3);
+        assert_eq!(get_build_count(ChangingWatcher), 4);
+
+        assert_eq!(container.read(UnchangingWatcher), 0);
+        assert_eq!(container.read(ChangingWatcher), 2);
+        assert_eq!(get_build_count(stateful), 4);
+        assert_eq!(get_build_count(UnchangingIdempotentDep), 4);
+        assert_eq!(get_build_count(ChangingIdempotentDep), 4);
+        assert_eq!(get_build_count(UnchangingWatcher), 3);
+        assert_eq!(get_build_count(ChangingWatcher), 4);
+    }
 
     // We use a more sophisticated graph here for a more thorough test of all functionality
     //
