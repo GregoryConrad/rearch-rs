@@ -1,0 +1,20 @@
+[package]
+name = "rearch-ui"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+description.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+authors.workspace = true
+readme = "README.md"
+
+[lints]
+workspace = true
+
+[dependencies]
+rearch = { workspace = true }
