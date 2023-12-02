@@ -1,4 +1,13 @@
-#![allow(dead_code, unused_variables, clippy::needless_update)]
+#![allow(
+    dead_code,
+    unused_variables,
+    clippy::needless_update,
+    clippy::needless_pass_by_value,
+    clippy::unused_self,
+    clippy::unwrap_used
+)]
+
+use std::{any::Any, cell::OnceCell};
 
 use rearch::SideEffectRegistrar;
 
@@ -10,7 +19,7 @@ fn sample_view(_: ViewHandle, _: ()) -> TerminatedView {
         .multichild(row, ())
         .children(vec![
             view_single(ez_text, "Hello World!".to_owned()),
-            view_single(text, Default::default()),
+            view_single(text, TextProps::default()),
             view()
                 .inject(
                     text_props,
@@ -73,10 +82,10 @@ fn injected_text(ViewHandle { mut context, .. }: ViewHandle, _: ()) -> Terminate
 // THE FOLLOWING IS GLUE CODE FOR THE PROTOTYPE TO COMPILE
 
 struct ViewCapsuleReader; // analogous to CapsuleReader but uses something like onNextUpdate in Dart
-struct Context; // to support scoped state and other UI interactions
-struct ViewHandle {
+struct Context; // to support scoped state and other UI interactions (constraints)
+struct ViewHandle<'side_effect> {
     pub get: ViewCapsuleReader,
-    pub register: SideEffectRegistrar, // all side effects from ReArch should just work here
+    pub register: SideEffectRegistrar<'side_effect>, // all side effects from ReArch should just work here
     pub context: Context,
 }
 
@@ -93,11 +102,26 @@ impl Context {
     }
 }
 
+fn keys_eq<T: PartialEq + 'static>(old: &Key, new: &Key) -> bool {
+    if let (Some(old), Some(new)) = (old.downcast_ref::<T>(), new.downcast_ref::<T>()) {
+        old == new
+    } else {
+        false
+    }
+}
+
+type Key = Box<dyn Any>;
+type KeysEqCheck = fn(&Box<dyn Any>, &Box<dyn Any>) -> bool;
+
 struct TerminatedView;
 struct MultiChildView;
-struct IntermediateView;
+
+#[derive(Default)]
+struct IntermediateView {
+    curr_key_info: Option<(Key, KeysEqCheck)>,
+}
 impl IntermediateView {
-    fn inject<F, T, U>(self, scope: F, props: T) -> IntermediateView
+    pub fn inject<F, T, U>(self, scope: F, props: T) -> Self
     where
         F: Fn(ViewHandle, T) -> U,
     {
@@ -105,31 +129,35 @@ impl IntermediateView {
         self
     }
 
-    fn keyed<T>(self, key: T) -> IntermediateView {
-        // set following child key to key
+    pub fn keyed<T: PartialEq + 'static>(mut self, key: T) -> Self {
+        let eq_check: fn(&Box<dyn Any>, &Box<dyn Any>) -> bool = keys_eq::<T>;
+        self.curr_key_info = Some((Box::new(key), eq_check));
         self
     }
 
-    fn child<F, T>(self, child: F, props: T) -> IntermediateView
+    pub fn child<F, T>(mut self, child: F, props: T) -> Self
     where
-        F: Fn(ViewHandle, T) -> IntermediateView,
+        F: Fn(ViewHandle, T) -> Self,
     {
+        let key_info = std::mem::take(&mut self.curr_key_info);
         // append child to self
         self
     }
 
-    fn multichild<F, T>(self, child: F, props: T) -> MultiChildView
+    pub fn multichild<F, T>(mut self, child: F, props: T) -> MultiChildView
     where
         F: Fn(ViewHandle, T) -> MultiChildView,
     {
+        let key_info = std::mem::take(&mut self.curr_key_info);
         // append child to self
         MultiChildView
     }
 
-    fn end<F, T>(self, child: F, props: T) -> TerminatedView
+    pub fn end<F, T>(mut self, child: F, props: T) -> TerminatedView
     where
         F: Fn(ViewHandle, T) -> TerminatedView,
     {
+        let key_info = std::mem::take(&mut self.curr_key_info);
         // append child to self
         TerminatedView
     }
@@ -144,7 +172,7 @@ impl MultiChildView {
 }
 
 fn view() -> IntermediateView {
-    IntermediateView
+    IntermediateView::default()
 }
 
 // This one probably wouldn't need to change, as it is just sugar
@@ -166,7 +194,7 @@ fn text(_: ViewHandle, TextProps { text }: TextProps) -> TerminatedView {
     TerminatedView
 }
 fn padding(_: ViewHandle, padding: f64) -> IntermediateView {
-    IntermediateView
+    view()
 }
 fn row(_: ViewHandle, _: ()) -> MultiChildView {
     MultiChildView
@@ -175,5 +203,11 @@ fn column(_: ViewHandle, (alignment, padding): (i32, f64)) -> MultiChildView {
     MultiChildView
 }
 fn center(_: ViewHandle, _: ()) -> IntermediateView {
-    IntermediateView
+    view()
+}
+
+struct ViewNode {
+    key: Box<dyn Any>,
+    side_effect: OnceCell<Box<dyn Any + Send>>,
+    constraints: (),
 }
