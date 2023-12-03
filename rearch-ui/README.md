@@ -8,37 +8,30 @@ See `lib.rs` for more:
 fn sample_view(_: ViewHandle, _: ()) -> TerminatedView {
     view()
         // If you decide to use the builtin proc macro:
-        .padding(16.0) // sugar for .child(padding, 16.0)
+        .padding(16.0) // sugar for .child(padding, 16.0) without proc macro
 
         // Views to align things:
         .center() // sugar for .child(center, ())
 
-        // We will also support scoped state:
+        // We will also support scoping state:
         .inject(scoped_state, 1234) // injects whatever scoped_state returns into all descendants
         // A similar macro will exist for scoping state: .scoped_state(1234)
 
         // And of course you can have views with multiple children:
         .row(Default::default())
         .children(vec![
-            view_single(ez_text, "Hello World!".to_owned()),
-            view_single(text, Default::default()),
+            view().child(text, "Hello World!".to_owned()),
             view()
-                .inject(
-                    text_props,
-                    TextProps {
-                        text: "Hello World!".to_owned(),
-                        ..Default::default()
-                    },
-                )
-                .end(injected_text, ()),
+                .inject(text_style, TextStyle)
+                .child(text, "Hello World Again!".to_owned()),
             view()
                 .child(padding, 16.0)
-                .multichild(column, (0, 0.0))
+                .child(column, (0, 0.0))
                 .children(vec![
-                    view_single(ez_text, "Hello World!".to_owned()),
+                    view().child(text, "A list item:".to_owned()),
                     view()
                         .inject(scoped_index_key::<usize>, 0)
-                        .end(list_item, ()),
+                        .child(list_item, ()),
                 ]),
         ])
 }

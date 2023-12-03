@@ -21,20 +21,20 @@ fn sample_view(_: ViewHandle, _: ()) -> TerminatedView {
         .child(center, ())
         .inject(scoped_state, ())
         .child(padding, 16.0)
-        .multichild(row, ())
+        .child(row, ())
         .children(vec![
-            view_single(text, "Hello World!".to_owned()),
+            view().child(text, "Hello World!".to_owned()),
             view()
                 .inject(text_style, TextStyle)
-                .end(text, "Hello World Again!".to_owned()),
+                .child(text, "Hello World Again!".to_owned()),
             view()
                 .child(padding, 16.0)
-                .multichild(column, (0, 0.0))
+                .child(column, (0, 0.0))
                 .children(vec![
-                    view_single(text, "A list item:".to_owned()),
+                    view().child(text, "A list item:".to_owned()),
                     view()
                         .inject(scoped_index_key::<usize>, 0)
-                        .end(list_item, ()),
+                        .child(list_item, ()),
                 ]),
         ])
 }
@@ -43,13 +43,13 @@ fn sample_view(_: ViewHandle, _: ()) -> TerminatedView {
 fn scoped_state(_: ViewHandle, _: ()) -> u32 {
     0
 }
-fn scoped_index_key<T: Clone>(_: ViewHandle, index: T) -> T {
+fn scoped_index_key<T>(_: ViewHandle, index: T) -> T {
     index
 }
 
 fn list_item(ViewHandle { mut context, .. }: ViewHandle, _: ()) -> TerminatedView {
     let index = context.get(scoped_index_key::<usize>).unwrap();
-    view().keyed(index).end(text, format!("{index}"))
+    view().keyed(index).child(text, format!("{index}"))
 }
 
 // THE FOLLOWING IS GLUE CODE FOR THE PROTOTYPE TO COMPILE
@@ -84,17 +84,13 @@ fn keys_eq<T: PartialEq + 'static>(old: &Key, new: &Key) -> bool {
 }
 
 type Key = Box<dyn Any>;
-type KeysEqCheck = fn(&Box<dyn Any>, &Box<dyn Any>) -> bool;
+type KeysEqCheck = fn(&Key, &Key) -> bool;
 type InjectionBuilder = Box<dyn FnOnce(ViewHandle) -> Box<dyn Any>>;
 type ChildBuilder = Box<dyn FnOnce(ViewHandle) -> IntermediateView>;
-
-struct TerminatedView;
-struct MultiChildView;
 
 enum ViewLayer {
     Key {
         key: Key,
-        key_type: TypeId,
         key_eq_check: KeysEqCheck,
     },
     Injection {
@@ -107,63 +103,42 @@ enum ViewLayer {
     },
 }
 
+struct TerminatedView;
+struct MultiChildView;
 #[derive(Default)]
 struct IntermediateView {
     layers: Vec<ViewLayer>,
 }
 impl IntermediateView {
-    pub fn inject<F, T, U>(mut self, scope: F, props: T) -> Self
+    pub fn inject<Injection, Props, Data>(mut self, scope: Injection, props: Props) -> Self
     where
-        T: 'static,
-        U: 'static,
-        F: 'static + Fn(ViewHandle, T) -> U,
+        Props: 'static,
+        Data: 'static + Clone,
+        Injection: 'static + Fn(ViewHandle, Props) -> Data,
     {
         self.layers.push(ViewLayer::Injection {
-            injection_type: TypeId::of::<F>(),
+            injection_type: TypeId::of::<Injection>(),
             build_injection_data: Box::new(move |handle| Box::new(scope(handle, props))),
         });
         self
     }
 
-    pub fn keyed<T: PartialEq + 'static>(mut self, key: T) -> Self {
+    pub fn keyed<Key: PartialEq + 'static>(mut self, key: Key) -> Self {
         self.layers.push(ViewLayer::Key {
-            key_type: TypeId::of::<T>(),
             key: Box::new(key),
-            key_eq_check: keys_eq::<T>,
+            key_eq_check: keys_eq::<Key>,
         });
         self
     }
 
-    pub fn child<F, T>(mut self, child: F, props: T) -> Self
+    pub fn child<Child, Props, Output>(self, child: Child, props: Props) -> Output
     where
-        T: 'static,
-        F: 'static + Fn(ViewHandle, T) -> Self,
+        Output: FromIntermediateViewAndChild,
+        Props: 'static,
+        Child: 'static + Fn(ViewHandle, Props) -> Output,
     {
-        self.layers.push(ViewLayer::Child {
-            child_type: TypeId::of::<F>(),
-            build_child: Box::new(move |handle| child(handle, props)),
-        });
-        self
+        Output::from(self, child, props)
     }
-
-    pub fn multichild<F, T>(self, child: F, props: T) -> MultiChildView
-    where
-        F: Fn(ViewHandle, T) -> MultiChildView,
-    {
-        // append child to self
-        MultiChildView
-    }
-
-    pub fn end<F, T>(self, child: F, props: T) -> TerminatedView
-    where
-        F: Fn(ViewHandle, T) -> TerminatedView,
-    {
-        // append child to self
-        TerminatedView
-    }
-
-    // Users could also make their own custom functions like child0, child1, etc.
-    // that remove the need for passing tuples into child() instead of relying on the macro below
 }
 impl MultiChildView {
     fn children(self, children: Vec<TerminatedView>) -> TerminatedView {
@@ -171,21 +146,42 @@ impl MultiChildView {
     }
 }
 
+trait FromIntermediateViewAndChild {
+    fn from<Child, Props>(intermediate_view: IntermediateView, child: Child, props: Props) -> Self
+    where
+        Props: 'static,
+        Child: 'static + Fn(ViewHandle, Props) -> Self;
+}
+impl FromIntermediateViewAndChild for TerminatedView {
+    fn from<Child, Props>(intermediate_view: IntermediateView, child: Child, props: Props) -> Self {
+        Self
+    }
+}
+impl FromIntermediateViewAndChild for MultiChildView {
+    fn from<Child, Props>(intermediate_view: IntermediateView, child: Child, props: Props) -> Self {
+        Self
+    }
+}
+impl FromIntermediateViewAndChild for IntermediateView {
+    fn from<Child, Props>(
+        mut intermediate_view: IntermediateView,
+        child: Child,
+        props: Props,
+    ) -> Self
+    where
+        Props: 'static,
+        Child: 'static + Fn(ViewHandle, Props) -> Self,
+    {
+        intermediate_view.layers.push(ViewLayer::Child {
+            child_type: TypeId::of::<Child>(),
+            build_child: Box::new(move |handle| child(handle, props)),
+        });
+        intermediate_view
+    }
+}
+
 fn view() -> IntermediateView {
     IntermediateView::default()
-}
-
-// This one probably wouldn't need to change, as it is just sugar
-fn view_single<F, T>(child: F, props: T) -> TerminatedView
-where
-    F: Fn(ViewHandle, T) -> TerminatedView,
-{
-    view().end(child, props)
-}
-
-// Enable type-based injection
-fn data<T: Clone>(_: ViewHandle, data: T) -> T {
-    data
 }
 
 // rows, column, and others can use render/layout primitives provided in views themselves
