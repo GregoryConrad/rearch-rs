@@ -7,10 +7,15 @@
     clippy::unwrap_used
 )]
 
-use std::{any::Any, cell::OnceCell};
+use std::{
+    any::{Any, TypeId},
+    cell::OnceCell,
+};
 
 use rearch::SideEffectRegistrar;
 
+// proc macro could produce sealed trait (to prevent impl elsewhere), new trait, and impl for View
+// #[view] // which can add view.sample_view() sort of deal as convenience, but not required
 fn sample_view(_: ViewHandle, _: ()) -> TerminatedView {
     view()
         .child(center, ())
@@ -18,39 +23,20 @@ fn sample_view(_: ViewHandle, _: ()) -> TerminatedView {
         .child(padding, 16.0)
         .multichild(row, ())
         .children(vec![
-            view_single(ez_text, "Hello World!".to_owned()),
-            view_single(text, TextProps::default()),
+            view_single(text, "Hello World!".to_owned()),
             view()
-                .inject(
-                    text_props,
-                    TextProps {
-                        text: "Hello World!".to_owned(),
-                        ..Default::default()
-                    },
-                )
-                .end(injected_text, ()),
+                .inject(text_style, TextStyle)
+                .end(text, "Hello World Again!".to_owned()),
             view()
                 .child(padding, 16.0)
                 .multichild(column, (0, 0.0))
                 .children(vec![
-                    view_single(ez_text, "Hello World!".to_owned()),
+                    view_single(text, "A list item:".to_owned()),
                     view()
                         .inject(scoped_index_key::<usize>, 0)
                         .end(list_item, ()),
                 ]),
         ])
-}
-
-// proc macro could produce sealed trait (to prevent impl elsewhere), new trait, and impl for View
-// #[view] // which can add view.text() sort of gist as convenience, but not required
-fn ez_text(_: ViewHandle, str: String) -> TerminatedView {
-    view_single(
-        text,
-        TextProps {
-            text: str,
-            ..Default::default()
-        },
-    )
 }
 
 // #[scoped] -> similar to #[view] above for convenience
@@ -63,20 +49,7 @@ fn scoped_index_key<T: Clone>(_: ViewHandle, index: T) -> T {
 
 fn list_item(ViewHandle { mut context, .. }: ViewHandle, _: ()) -> TerminatedView {
     let index = context.get(scoped_index_key::<usize>).unwrap();
-    view().keyed(index).end(
-        text,
-        TextProps {
-            text: format!("{index}"),
-            ..Default::default()
-        },
-    )
-}
-
-fn text_props(_: ViewHandle, props: TextProps) -> TextProps {
-    props
-}
-fn injected_text(ViewHandle { mut context, .. }: ViewHandle, _: ()) -> TerminatedView {
-    view_single(text, context.get(text_props).unwrap())
+    view().keyed(index).end(text, format!("{index}"))
 }
 
 // THE FOLLOWING IS GLUE CODE FOR THE PROTOTYPE TO COMPILE
@@ -112,52 +85,79 @@ fn keys_eq<T: PartialEq + 'static>(old: &Key, new: &Key) -> bool {
 
 type Key = Box<dyn Any>;
 type KeysEqCheck = fn(&Box<dyn Any>, &Box<dyn Any>) -> bool;
+type InjectionBuilder = Box<dyn FnOnce(ViewHandle) -> Box<dyn Any>>;
+type ChildBuilder = Box<dyn FnOnce(ViewHandle) -> IntermediateView>;
 
 struct TerminatedView;
 struct MultiChildView;
 
+enum ViewLayer {
+    Key {
+        key: Key,
+        key_type: TypeId,
+        key_eq_check: KeysEqCheck,
+    },
+    Injection {
+        injection_type: TypeId,
+        build_injection_data: InjectionBuilder,
+    },
+    Child {
+        child_type: TypeId,
+        build_child: ChildBuilder,
+    },
+}
+
 #[derive(Default)]
 struct IntermediateView {
-    curr_key_info: Option<(Key, KeysEqCheck)>,
+    layers: Vec<ViewLayer>,
 }
 impl IntermediateView {
-    pub fn inject<F, T, U>(self, scope: F, props: T) -> Self
+    pub fn inject<F, T, U>(mut self, scope: F, props: T) -> Self
     where
-        F: Fn(ViewHandle, T) -> U,
+        T: 'static,
+        U: 'static,
+        F: 'static + Fn(ViewHandle, T) -> U,
     {
-        // invoke scope and put its data in descendant context
+        self.layers.push(ViewLayer::Injection {
+            injection_type: TypeId::of::<F>(),
+            build_injection_data: Box::new(move |handle| Box::new(scope(handle, props))),
+        });
         self
     }
 
     pub fn keyed<T: PartialEq + 'static>(mut self, key: T) -> Self {
-        let eq_check: fn(&Box<dyn Any>, &Box<dyn Any>) -> bool = keys_eq::<T>;
-        self.curr_key_info = Some((Box::new(key), eq_check));
+        self.layers.push(ViewLayer::Key {
+            key_type: TypeId::of::<T>(),
+            key: Box::new(key),
+            key_eq_check: keys_eq::<T>,
+        });
         self
     }
 
     pub fn child<F, T>(mut self, child: F, props: T) -> Self
     where
-        F: Fn(ViewHandle, T) -> Self,
+        T: 'static,
+        F: 'static + Fn(ViewHandle, T) -> Self,
     {
-        let key_info = std::mem::take(&mut self.curr_key_info);
-        // append child to self
+        self.layers.push(ViewLayer::Child {
+            child_type: TypeId::of::<F>(),
+            build_child: Box::new(move |handle| child(handle, props)),
+        });
         self
     }
 
-    pub fn multichild<F, T>(mut self, child: F, props: T) -> MultiChildView
+    pub fn multichild<F, T>(self, child: F, props: T) -> MultiChildView
     where
         F: Fn(ViewHandle, T) -> MultiChildView,
     {
-        let key_info = std::mem::take(&mut self.curr_key_info);
         // append child to self
         MultiChildView
     }
 
-    pub fn end<F, T>(mut self, child: F, props: T) -> TerminatedView
+    pub fn end<F, T>(self, child: F, props: T) -> TerminatedView
     where
         F: Fn(ViewHandle, T) -> TerminatedView,
     {
-        let key_info = std::mem::take(&mut self.curr_key_info);
         // append child to self
         TerminatedView
     }
@@ -183,16 +183,25 @@ where
     view().end(child, props)
 }
 
+// Enable type-based injection
+fn data<T: Clone>(_: ViewHandle, data: T) -> T {
+    data
+}
+
 // rows, column, and others can use render/layout primitives provided in views themselves
 
-#[derive(Clone, Default)]
-struct TextProps {
-    pub text: String,
-}
-
-fn text(_: ViewHandle, TextProps { text }: TextProps) -> TerminatedView {
+fn text(ViewHandle { mut context, .. }: ViewHandle, str: String) -> TerminatedView {
+    let style = context.get(text_style);
     TerminatedView
 }
+#[derive(Clone, Default)]
+struct TextStyle;
+fn text_style(ViewHandle { mut context, .. }: ViewHandle, style: TextStyle) -> TextStyle {
+    let parent = context.get(text_style);
+    // merge style with one from parent
+    style
+}
+
 fn padding(_: ViewHandle, padding: f64) -> IntermediateView {
     view()
 }
