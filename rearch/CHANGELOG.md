@@ -1,6 +1,39 @@
 
 
+## v0.4.2 (2023-12-06)
+
+### Chore
+
+ - <csr-id-4cb3de4f45d014a6a1edd130cfcd50b227604b34/> update version numbers
+
+### New Features
+
+ - <csr-id-1d336b50adfe7dc43962ac6188fa4b21342d025a/> add dynamic capsule support
+
+### Commit Statistics
+
+<csr-read-only-do-not-edit/>
+
+ - 2 commits contributed to the release.
+ - 6 days passed between releases.
+ - 2 commits were understood as [conventional](https://www.conventionalcommits.org).
+ - 1 unique issue was worked on: [#10](https://github.com/GregoryConrad/rearch-rs/issues/10)
+
+### Commit Details
+
+<csr-read-only-do-not-edit/>
+
+<details><summary>view details</summary>
+
+ * **[#10](https://github.com/GregoryConrad/rearch-rs/issues/10)**
+    - Add dynamic capsule support ([`1d336b5`](https://github.com/GregoryConrad/rearch-rs/commit/1d336b50adfe7dc43962ac6188fa4b21342d025a))
+ * **Uncategorized**
+    - Update version numbers ([`4cb3de4`](https://github.com/GregoryConrad/rearch-rs/commit/4cb3de4f45d014a6a1edd130cfcd50b227604b34))
+</details>
+
 ## v0.4.1 (2023-11-30)
+
+<csr-id-762eb7bab9fcace1144a77697719a06b290153ff/>
 
 ### New Features
 
@@ -22,7 +55,7 @@
 
 <csr-read-only-do-not-edit/>
 
- - 4 commits contributed to the release.
+ - 5 commits contributed to the release.
  - 4 commits were understood as [conventional](https://www.conventionalcommits.org).
  - 0 issues like '(#ID)' were seen in commit messages
 
@@ -33,6 +66,7 @@
 <details><summary>view details</summary>
 
  * **Uncategorized**
+    - Release rearch v0.4.1 ([`cc0fccf`](https://github.com/GregoryConrad/rearch-rs/commit/cc0fccf5c1fcb901ec4f8accc323e9ecef665eae))
     - Switch style back to rust stable ([`4427dd0`](https://github.com/GregoryConrad/rearch-rs/commit/4427dd0786b73cfb4b760d4ac1f5525171f335e4))
     - Make the as_listener side effect register () ([`f1efbcf`](https://github.com/GregoryConrad/rearch-rs/commit/f1efbcfbef09b2c36bf39120afbc60c0400c92ce))
     - Fix code formatting ([`762eb7b`](https://github.com/GregoryConrad/rearch-rs/commit/762eb7bab9fcace1144a77697719a06b290153ff))
