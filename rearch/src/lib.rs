@@ -44,6 +44,17 @@ pub trait Capsule: Send + 'static {
     /// Returns whether or not a capsule's old data and new data are equivalent
     /// (and thus whether or not we can skip rebuilding dependents as an optimization).
     fn eq(old: &Self::Data, new: &Self::Data) -> bool;
+
+    /// Returns the key to use for this capsule.
+    /// Most capsules should use the default implementation,
+    /// which is for static capsules.
+    /// If you specifically need dynamic capsules,
+    /// such as for an incremental computation focused application,
+    /// you will need to implement this function.
+    /// See [`CapsuleKey`] for more.
+    fn key(&self) -> CapsuleKey {
+        CapsuleKey::Static
+    }
 }
 impl<T, F> Capsule for F
 where
@@ -57,9 +68,48 @@ where
     }
 
     // Unfortunately, negative trait impls don't exist yet.
-    // If they did, this would have a separate impl for PartialEq/Eq.
+    // If they did, this would have a separate impl for T: Eq.
     fn eq(_old: &Self::Data, _new: &Self::Data) -> bool {
         false
+    }
+}
+
+/// Represents a key for a capsule.
+/// You'll only ever need to use this directly if you are making dynamic (runtime) capsules.
+/// Most applications are just fine with static/function capsules.
+/// If you are making an incremental computation focused application,
+/// then you may need dynamic capsules.
+#[derive(Debug, PartialEq, Eq, Hash)]
+pub enum CapsuleKey {
+    /// A static capsule that is identified by its [`TypeId`].
+    Static,
+    /// A dynamic capsule, whose key is the supplied bytes.
+    Bytes(Vec<u8>),
+}
+impl From<Vec<u8>> for CapsuleKey {
+    fn from(bytes: Vec<u8>) -> Self {
+        Self::Bytes(bytes)
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, Hash)]
+struct InternalKey {
+    // We need to have a copy of the capsule's type to include in the Hash + Eq
+    // so that if two capsules of different types have the same bytes as their key,
+    // they won't be kept under the same entry in the map.
+    capsule_type: TypeId,
+    capsule_key: CapsuleKey,
+}
+type Id = Arc<InternalKey>;
+trait CreateId {
+    fn id(&self) -> Id;
+}
+impl<C: Capsule> CreateId for C {
+    fn id(&self) -> Id {
+        Arc::new(InternalKey {
+            capsule_type: TypeId::of::<C>(),
+            capsule_key: self.key(),
+        })
     }
 }
 
@@ -249,7 +299,7 @@ impl Container {
 /// that acts as your listener. When you normally would call `container.listen()`,
 /// instead call `container.read(my_nonidempotent_listener)` to initialize it.
 pub struct ListenerHandle {
-    id: TypeId,
+    id: Id,
     store: Weak<ContainerStore>,
 }
 impl Drop for ListenerHandle {
@@ -257,7 +307,7 @@ impl Drop for ListenerHandle {
         if let Some(store) = self.store.upgrade() {
             // Note: The node is guaranteed to be in the graph here since it is a listener.
             let rebuilder = CapsuleRebuilder(Weak::clone(&self.store));
-            store.with_write_txn(rebuilder, |txn| txn.dispose_node(self.id));
+            store.with_write_txn(rebuilder, |txn| txn.dispose_node(&self.id));
         }
     }
 }
@@ -298,11 +348,10 @@ generate_capsule_list_impl!(A, B, C, D, E, F, G, H);
 
 /// The internal backing store for a `Container`.
 /// All capsule data is stored within `data`, and all data flow graph nodes are stored in `nodes`.
-/// Keys for both are simply the `TypeId` of capsules, like `TypeId::of::<SomeCapsule>()`.
 #[derive(Default)]
 struct ContainerStore {
-    data: concread::hashmap::HashMap<TypeId, Box<dyn CapsuleData>>,
-    nodes: Mutex<std::collections::HashMap<TypeId, CapsuleManager>>,
+    data: concread::hashmap::HashMap<Id, Box<dyn CapsuleData>>,
+    nodes: Mutex<std::collections::HashMap<Id, CapsuleManager>>,
 }
 impl ContainerStore {
     fn with_read_txn<R>(&self, to_run: impl FnOnce(&ContainerReadTxn) -> R) -> R {
@@ -331,7 +380,7 @@ impl ContainerStore {
 #[derive(Clone)]
 struct CapsuleRebuilder(Weak<ContainerStore>);
 impl CapsuleRebuilder {
-    fn rebuild(&self, id: TypeId, mutation: impl FnOnce(&mut OnceCell<Box<dyn Any + Send>>)) {
+    fn rebuild(&self, id: Id, mutation: impl FnOnce(&mut OnceCell<Box<dyn Any + Send>>)) {
         #[allow(clippy::option_if_let_else)]
         if let Some(store) = self.0.upgrade() {
             #[cfg(feature = "logging")]
@@ -343,7 +392,7 @@ impl CapsuleRebuilder {
             store.with_write_txn(self.clone(), |txn| {
                 // We have the txn now, so that means we also hold the data & nodes lock.
                 // Thus, this is where we should run the supplied mutation.
-                mutation(txn.side_effect(id));
+                mutation(txn.side_effect(&id));
                 txn.build_capsule_or_panic(id);
             });
         } else {
@@ -368,9 +417,9 @@ const EXCLUSIVE_OWNER_MSG: &str =
 struct CapsuleManager {
     capsule: Option<Box<dyn Any + Send>>,
     side_effect: Option<OnceCell<Box<dyn Any + Send>>>,
-    dependencies: HashSet<TypeId>,
-    dependents: HashSet<TypeId>,
-    build: fn(&mut ContainerWriteTxn) -> bool,
+    dependencies: HashSet<Id>,
+    dependents: HashSet<Id>,
+    build: fn(Id, &mut ContainerWriteTxn) -> bool,
 }
 
 impl CapsuleManager {
@@ -385,19 +434,18 @@ impl CapsuleManager {
     }
 
     // Builds a capsule's new data and puts it into the txn, returning true when the data changes.
-    fn build<C: Capsule>(txn: &mut ContainerWriteTxn) -> bool {
-        let id = TypeId::of::<C>();
-
+    fn build<C: Capsule>(id: Id, txn: &mut ContainerWriteTxn) -> bool {
         #[cfg(feature = "logging")]
         log::trace!("Building {} ({:?})", std::any::type_name::<C>(), id);
 
         let new_data = {
-            let (capsule, mut side_effect) = txn.take_capsule_and_side_effect(id);
+            let (capsule, mut side_effect) = txn.take_capsule_and_side_effect(&id);
 
             let rebuilder = {
                 let rebuilder = txn.rebuilder.clone();
+                let id = Arc::clone(&id);
                 Box::new(move |mutation: Box<dyn FnOnce(&mut Box<_>)>| {
-                    rebuilder.rebuild(id, |effect| {
+                    rebuilder.rebuild(Arc::clone(&id), |effect| {
                         let effect = effect.get_mut().expect(concat!(
                             "The side effect must've been previously initialized ",
                             "in order to use the rebuilder"
@@ -411,11 +459,11 @@ impl CapsuleManager {
                 .downcast_ref::<C>()
                 .expect("Types should be properly enforced due to generics")
                 .build(CapsuleHandle {
-                    get: CapsuleReader::new(id, txn),
+                    get: CapsuleReader::new(Arc::clone(&id), txn),
                     register: SideEffectRegistrar::new(&mut side_effect, rebuilder),
                 });
 
-            txn.yield_capsule_and_side_effect(id, capsule, side_effect);
+            txn.yield_capsule_and_side_effect(&id, capsule, side_effect);
 
             new_data
         };
@@ -656,7 +704,7 @@ mod tests {
             type Data = u32;
 
             fn build(&self, CapsuleHandle { mut get, .. }: CapsuleHandle) -> Self::Data {
-                increment_build_count(UnchangingIdempotentDep);
+                increment_build_count(Self);
                 _ = get.get(stateful);
                 0
             }
@@ -671,7 +719,7 @@ mod tests {
             type Data = u32;
 
             fn build(&self, CapsuleHandle { mut get, .. }: CapsuleHandle) -> Self::Data {
-                increment_build_count(UnchangingWatcher);
+                increment_build_count(Self);
                 get.get(UnchangingIdempotentDep)
             }
 
@@ -685,7 +733,7 @@ mod tests {
             type Data = u32;
 
             fn build(&self, CapsuleHandle { mut get, .. }: CapsuleHandle) -> Self::Data {
-                increment_build_count(ChangingIdempotentDep);
+                increment_build_count(Self);
                 get.get(stateful).0
             }
 
@@ -699,7 +747,7 @@ mod tests {
             type Data = u32;
 
             fn build(&self, CapsuleHandle { mut get, .. }: CapsuleHandle) -> Self::Data {
-                increment_build_count(ChangingWatcher);
+                increment_build_count(Self);
                 get.get(ChangingIdempotentDep)
             }
 
@@ -771,6 +819,108 @@ mod tests {
         assert_eq!(get_build_count(ChangingIdempotentDep), 4);
         assert_eq!(get_build_count(UnchangingWatcher), 3);
         assert_eq!(get_build_count(ChangingWatcher), 4);
+    }
+
+    #[test]
+    fn fib_dynamic_capsules() {
+        struct FibCapsule(u8);
+        impl Capsule for FibCapsule {
+            type Data = u128;
+
+            fn build(&self, CapsuleHandle { mut get, .. }: CapsuleHandle) -> Self::Data {
+                let Self(n) = self;
+                match n {
+                    0 => 0,
+                    1 => 1,
+                    n => get.get(Self(n - 1)) + get.get(Self(n - 2)),
+                }
+            }
+
+            fn eq(old: &Self::Data, new: &Self::Data) -> bool {
+                old == new
+            }
+
+            fn key(&self) -> CapsuleKey {
+                let Self(id) = self;
+                id.to_le_bytes().as_ref().to_owned().into()
+            }
+        }
+
+        let container = Container::new();
+        assert_eq!(container.read(FibCapsule(100)), 354_224_848_179_261_915_075);
+    }
+
+    #[test]
+    fn dynamic_capsules_remain_isolated() {
+        struct A(u8);
+        impl Capsule for A {
+            type Data = u8;
+
+            fn build(&self, _: CapsuleHandle) -> Self::Data {
+                self.0
+            }
+
+            fn eq(old: &Self::Data, new: &Self::Data) -> bool {
+                old == new
+            }
+
+            fn key(&self) -> CapsuleKey {
+                vec![self.0].into()
+            }
+        }
+        struct B(u8);
+        impl Capsule for B {
+            type Data = u8;
+
+            fn build(&self, _: CapsuleHandle) -> Self::Data {
+                self.0 + 1
+            }
+
+            fn eq(old: &Self::Data, new: &Self::Data) -> bool {
+                old == new
+            }
+
+            fn key(&self) -> CapsuleKey {
+                vec![self.0].into()
+            }
+        }
+
+        // A and B will have the same bytes in their keys, but should remain separate
+        let container = Container::new();
+        assert_eq!(container.read(A(0)), 0);
+        assert_eq!(container.read(B(0)), 1);
+    }
+
+    #[test]
+    fn dynamic_and_static_capsules() {
+        fn stateful(CapsuleHandle { register, .. }: CapsuleHandle) -> (u8, impl CData + Fn(u8)) {
+            let (state, set_state) = register.register(side_effects::state(0));
+            (*state, set_state)
+        }
+        struct Cell(u8);
+        impl Capsule for Cell {
+            type Data = u8;
+
+            fn build(&self, CapsuleHandle { mut get, .. }: CapsuleHandle) -> Self::Data {
+                self.0 + get.get(stateful).0
+            }
+
+            fn eq(old: &Self::Data, new: &Self::Data) -> bool {
+                old == new
+            }
+
+            fn key(&self) -> CapsuleKey {
+                vec![self.0].into()
+            }
+        }
+        fn sink(CapsuleHandle { mut get, .. }: CapsuleHandle) -> (u8, u8) {
+            (get.get(Cell(0)), get.get(Cell(1)))
+        }
+
+        let container = Container::new();
+        assert_eq!(container.read(sink), (0, 1));
+        container.read(stateful).1(1);
+        assert_eq!(container.read(sink), (1, 2));
     }
 
     // We use a more sophisticated graph here for a more thorough test of all functionality

@@ -1,26 +1,27 @@
-use std::{
-    any::{Any, TypeId},
-    collections::HashMap,
-};
+use std::{any::Any, collections::HashMap};
 
-use crate::{Capsule, CapsuleData, ContainerWriteTxn};
+use crate::{Capsule, CapsuleData, ContainerWriteTxn, CreateId, Id};
 
 /// Allows you to read the current data of capsules based on the given state of the container txn.
 pub enum CapsuleReader<'scope, 'total> {
     // For normal operation
-    Normal {
-        id: TypeId,
-        txn: &'scope mut ContainerWriteTxn<'total>,
-    },
+    Normal(NormalCapsuleReader<'scope, 'total>),
     // To enable easy mocking in testing
-    Mock {
-        mocks: HashMap<TypeId, Box<dyn CapsuleData>>,
-    },
+    Mock(MockCapsuleReader),
+}
+#[allow(clippy::module_name_repetitions)]
+pub struct NormalCapsuleReader<'scope, 'total> {
+    id: Id,
+    txn: &'scope mut ContainerWriteTxn<'total>,
+}
+#[allow(clippy::module_name_repetitions)]
+pub struct MockCapsuleReader {
+    mocks: HashMap<Id, Box<dyn CapsuleData>>,
 }
 
 impl<'scope, 'total> CapsuleReader<'scope, 'total> {
-    pub(crate) fn new(id: TypeId, txn: &'scope mut ContainerWriteTxn<'total>) -> Self {
-        Self::Normal { id, txn }
+    pub(crate) fn new(id: Id, txn: &'scope mut ContainerWriteTxn<'total>) -> Self {
+        Self::Normal(NormalCapsuleReader { id, txn })
     }
 
     /// Reads the current data of the supplied capsule, initializing it if needed.
@@ -31,16 +32,16 @@ impl<'scope, 'total> CapsuleReader<'scope, 'total> {
     /// Panics when a capsule attempts to read itself in its first build.
     pub fn get<C: Capsule>(&mut self, capsule: C) -> C::Data {
         match self {
-            CapsuleReader::Normal { id, txn } => {
-                let (this, other) = (*id, TypeId::of::<C>());
-                if this == other {
+            CapsuleReader::Normal(NormalCapsuleReader { ref id, txn }) => {
+                let (this, other) = (id, capsule.id());
+                if this == &other {
                     return txn.try_read(&capsule).unwrap_or_else(|| {
                         let name = std::any::type_name::<C>();
                         panic!(
-                            "Capsule {name} tried to read itself on its first build! {} {} {}",
+                            "{name} ({id:?}) tried to read itself on its first build! {} {} {}",
                             "This is disallowed since the capsule doesn't have data to read yet.",
-                            "To avoid this issue, wrap the `read({name})` call in an if statement",
-                            "with the builtin \"is first build\" side effect."
+                            "To avoid this issue, wrap the `get()` call in an if statement",
+                            "with the builtin \"is_first_build\" side effect."
                         );
                     });
                 }
@@ -50,13 +51,13 @@ impl<'scope, 'total> CapsuleReader<'scope, 'total> {
                 txn.add_dependency_relationship(other, this);
                 data
             }
-            CapsuleReader::Mock { mocks } => {
-                let id = TypeId::of::<C>();
+            CapsuleReader::Mock(MockCapsuleReader { mocks }) => {
+                let id = capsule.id();
                 let any: Box<dyn Any> = mocks
                     .get(&id)
                     .unwrap_or_else(|| {
                         panic!(
-                            "Mock CapsuleReader was used to read {} {}",
+                            "Mock CapsuleReader was used to read {} ({id:?}) {}",
                             std::any::type_name::<C>(),
                             "when it was not included in the mock!"
                         );
@@ -85,7 +86,7 @@ impl<A: Capsule> FnMut<(A,)> for CapsuleReader<'_, '_> {
 }
 
 #[derive(Clone, Default)]
-pub struct MockCapsuleReaderBuilder(HashMap<TypeId, Box<dyn CapsuleData>>);
+pub struct MockCapsuleReaderBuilder(HashMap<Id, Box<dyn CapsuleData>>);
 
 impl MockCapsuleReaderBuilder {
     #[must_use]
@@ -94,13 +95,13 @@ impl MockCapsuleReaderBuilder {
     }
 
     #[must_use]
-    pub fn set<C: Capsule>(mut self, _capsule: &C, data: C::Data) -> Self {
-        self.0.insert(TypeId::of::<C>(), Box::new(data));
+    pub fn set<C: Capsule>(mut self, capsule: &C, data: C::Data) -> Self {
+        self.0.insert(capsule.id(), Box::new(data));
         self
     }
 
     #[must_use]
     pub fn build(self) -> CapsuleReader<'static, 'static> {
-        CapsuleReader::Mock { mocks: self.0 }
+        CapsuleReader::Mock(MockCapsuleReader { mocks: self.0 })
     }
 }
