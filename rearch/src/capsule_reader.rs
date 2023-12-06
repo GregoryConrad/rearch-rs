@@ -1,4 +1,4 @@
-use std::{any::Any, collections::HashMap, sync::Arc};
+use std::{any::Any, collections::HashMap};
 
 use crate::{Capsule, CapsuleData, ContainerWriteTxn, CreateId, Id};
 
@@ -32,9 +32,9 @@ impl<'scope, 'total> CapsuleReader<'scope, 'total> {
     /// Panics when a capsule attempts to read itself in its first build.
     pub fn get<C: Capsule>(&mut self, capsule: C) -> C::Data {
         match self {
-            CapsuleReader::Normal(NormalCapsuleReader { id, txn }) => {
-                let (this, other) = (Arc::clone(id), capsule.id());
-                if this == other {
+            CapsuleReader::Normal(NormalCapsuleReader { ref id, txn }) => {
+                let (this, other) = (id, capsule.id());
+                if this == &other {
                     return txn.try_read(&capsule).unwrap_or_else(|| {
                         let name = std::any::type_name::<C>();
                         panic!(

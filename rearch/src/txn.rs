@@ -18,6 +18,7 @@ impl<'a> ContainerReadTxn<'a> {
 
 impl ContainerReadTxn<'_> {
     #[must_use]
+    #[allow(clippy::missing_panics_doc)]
     pub fn try_read<C: Capsule>(&self, capsule: &C) -> Option<C::Data> {
         let id = capsule.id();
         self.data.get(&id).map(|data| {
@@ -62,17 +63,17 @@ impl ContainerWriteTxn<'_> {
             self.build_capsule(capsule);
         }
 
-        self.try_read_raw::<C>(id)
+        self.try_read_raw::<C>(&id)
             .expect("Data should be present due to checking/building capsule above")
     }
 
     #[must_use]
     pub fn try_read<C: Capsule>(&self, capsule: &C) -> Option<C::Data> {
-        self.try_read_raw::<C>(capsule.id())
+        self.try_read_raw::<C>(&capsule.id())
     }
 
-    fn try_read_raw<C: Capsule>(&self, id: Id) -> Option<C::Data> {
-        self.data.get(&id).map(|data| {
+    fn try_read_raw<C: Capsule>(&self, id: &Id) -> Option<C::Data> {
+        self.data.get(id).map(|data| {
             let data: Box<dyn Any> = data.clone();
             *data
                 .downcast::<C::Data>()
@@ -82,23 +83,22 @@ impl ContainerWriteTxn<'_> {
 
     /// Forcefully disposes only the requested node, cleaning up the node's direct dependencies.
     /// Panics if the node or one of its dependencies is not in the graph.
-    pub(crate) fn dispose_node(&mut self, id: Id) {
-        self.data.remove(&id);
+    pub(crate) fn dispose_node(&mut self, id: &Id) {
+        self.data.remove(id);
         self.nodes
-            .remove(&id)
+            .remove(id)
             .expect("Node should be in graph")
             .dependencies
             .iter()
-            .cloned()
             .for_each(|dep| {
-                self.node_or_panic(dep).dependents.remove(&id);
+                self.node_or_panic(dep).dependents.remove(id);
             });
     }
 
-    pub(crate) fn add_dependency_relationship(&mut self, dependency: Id, dependent: Id) {
-        self.node_or_panic(Arc::clone(&dependency))
+    pub(crate) fn add_dependency_relationship(&mut self, dependency: Id, dependent: &Id) {
+        self.node_or_panic(&dependency)
             .dependents
-            .insert(Arc::clone(&dependent));
+            .insert(Arc::clone(dependent));
         self.node_or_panic(dependent)
             .dependencies
             .insert(dependency);
@@ -106,7 +106,7 @@ impl ContainerWriteTxn<'_> {
 
     /// Forcefully builds the capsule with the supplied id. Panics if node is not in the graph
     pub(crate) fn build_capsule_or_panic(&mut self, id: Id) {
-        let self_changed = self.build_single_node(Arc::clone(&id));
+        let self_changed = self.build_single_node(&id);
         if !self_changed {
             return;
         }
@@ -119,7 +119,7 @@ impl ContainerWriteTxn<'_> {
         changed_nodes.insert(id);
 
         for curr_id in build_order_stack.into_iter().rev() {
-            let node = self.node_or_panic(Arc::clone(&curr_id));
+            let node = self.node_or_panic(&curr_id);
 
             let have_deps_changed = node
                 .dependencies
@@ -133,10 +133,10 @@ impl ContainerWriteTxn<'_> {
                 // Note: dependency/dependent relationships will be ok after this,
                 // since we are disposing all dependents in the build order,
                 // because we are adding this node to changedNodes
-                self.dispose_single_node(Arc::clone(&curr_id));
+                self.dispose_single_node(&curr_id);
                 changed_nodes.insert(curr_id);
             } else {
-                let did_node_change = self.build_single_node(Arc::clone(&curr_id));
+                let did_node_change = self.build_single_node(&curr_id);
                 if did_node_change {
                     changed_nodes.insert(curr_id);
                 }
@@ -146,7 +146,7 @@ impl ContainerWriteTxn<'_> {
 
     pub(crate) fn take_capsule_and_side_effect(
         &mut self,
-        id: Id,
+        id: &Id,
     ) -> (Box<dyn Any + Send>, OnceCell<Box<dyn Any + Send>>) {
         let node = self.node_or_panic(id);
         let capsule = std::mem::take(&mut node.capsule).expect(EXCLUSIVE_OWNER_MSG);
@@ -156,7 +156,7 @@ impl ContainerWriteTxn<'_> {
 
     pub(crate) fn yield_capsule_and_side_effect(
         &mut self,
-        id: Id,
+        id: &Id,
         capsule: Box<dyn Any + Send>,
         side_effect: OnceCell<Box<dyn Any + Send>>,
     ) {
@@ -169,7 +169,7 @@ impl ContainerWriteTxn<'_> {
         node.side_effect = Some(side_effect);
     }
 
-    pub(crate) fn side_effect(&mut self, id: Id) -> &mut OnceCell<Box<dyn Any + Send>> {
+    pub(crate) fn side_effect(&mut self, id: &Id) -> &mut OnceCell<Box<dyn Any + Send>> {
         self.node_or_panic(id)
             .side_effect
             .as_mut()
@@ -180,7 +180,7 @@ impl ContainerWriteTxn<'_> {
     fn build_capsule<C: Capsule>(&mut self, capsule: C) {
         let id = capsule.id();
 
-        if let std::collections::hash_map::Entry::Vacant(e) = self.nodes.entry(id.clone()) {
+        if let std::collections::hash_map::Entry::Vacant(e) = self.nodes.entry(Arc::clone(&id)) {
             e.insert(CapsuleManager::new(capsule));
         }
 
@@ -188,28 +188,28 @@ impl ContainerWriteTxn<'_> {
     }
 
     /// Gets the requested node if it is in the graph
-    fn node(&mut self, id: Id) -> Option<&mut CapsuleManager> {
-        self.nodes.get_mut(&id)
+    fn node(&mut self, id: &Id) -> Option<&mut CapsuleManager> {
+        self.nodes.get_mut(id)
     }
 
     /// Gets the requested node or panics if it is not in the graph
-    fn node_or_panic(&mut self, id: Id) -> &mut CapsuleManager {
+    fn node_or_panic(&mut self, id: &Id) -> &mut CapsuleManager {
         self.node(id)
             .expect("Requested node should be in the graph")
     }
 
     /// Builds only the requested node. Panics if the node is not in the graph
-    fn build_single_node(&mut self, id: Id) -> bool {
+    fn build_single_node(&mut self, id: &Id) -> bool {
         // Remove old dependency info since it may change on this build
         // We use std::mem::take below to prevent needing a clone on the existing dependencies
-        let node = self.node_or_panic(Arc::clone(&id));
+        let node = self.node_or_panic(id);
         let old_deps = std::mem::take(&mut node.dependencies);
         for dep in old_deps {
-            self.node_or_panic(dep).dependents.remove(&id);
+            self.node_or_panic(&dep).dependents.remove(id);
         }
 
         // Trigger the build (which also populates its new dependencies in self)
-        (self.node_or_panic(Arc::clone(&id)).build)(id.clone(), self)
+        (self.node_or_panic(id).build)(Arc::clone(id), self)
     }
 
     /// Disposes just the supplied node, and *attempts* to clean up the node's direct dependencies.
@@ -217,17 +217,16 @@ impl ContainerWriteTxn<'_> {
     /// as an idempotent node getting disposed in that method may have dependencies that
     /// were already disposed from the graph.
     /// In all other cases, [`dispose_node`] is likely the proper method to use.
-    fn dispose_single_node(&mut self, id: Id) {
-        self.data.remove(&id);
+    fn dispose_single_node(&mut self, id: &Id) {
+        self.data.remove(id);
         self.nodes
-            .remove(&id)
+            .remove(id)
             .expect("Node should be in graph")
             .dependencies
             .iter()
-            .cloned()
             .for_each(|dep| {
                 if let Some(node) = self.node(dep) {
-                    node.dependents.remove(&id);
+                    node.dependents.remove(id);
                 }
             });
     }
@@ -250,11 +249,11 @@ impl ContainerWriteTxn<'_> {
                 // New node, so mark this node to be added later and process dependents
                 visited.insert(Arc::clone(&node));
                 to_visit_stack.push((true, Arc::clone(&node))); // mark node to be visited later
-                self.node_or_panic(node)
+                self.node_or_panic(&node)
                     .dependents
                     .iter()
+                    .filter(|dep| !visited.contains(*dep))
                     .cloned()
-                    .filter(|dep| !visited.contains(dep))
                     .for_each(|dep| to_visit_stack.push((false, dep)));
             }
         }
@@ -275,11 +274,11 @@ impl ContainerWriteTxn<'_> {
         let mut disposable = HashSet::new();
 
         for id in build_order_stack {
-            let node = self.node_or_panic(Arc::clone(id));
+            let node = self.node_or_panic(id);
             let dependents_all_disposable =
                 node.dependents.iter().all(|dep| disposable.contains(dep));
             if node.is_idempotent() && dependents_all_disposable {
-                disposable.insert(id.clone());
+                disposable.insert(Arc::clone(id));
             }
         }
 

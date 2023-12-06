@@ -307,7 +307,7 @@ impl Drop for ListenerHandle {
         if let Some(store) = self.store.upgrade() {
             // Note: The node is guaranteed to be in the graph here since it is a listener.
             let rebuilder = CapsuleRebuilder(Weak::clone(&self.store));
-            store.with_write_txn(rebuilder, |txn| txn.dispose_node(Arc::clone(&self.id)));
+            store.with_write_txn(rebuilder, |txn| txn.dispose_node(&self.id));
         }
     }
 }
@@ -392,7 +392,7 @@ impl CapsuleRebuilder {
             store.with_write_txn(self.clone(), |txn| {
                 // We have the txn now, so that means we also hold the data & nodes lock.
                 // Thus, this is where we should run the supplied mutation.
-                mutation(txn.side_effect(Arc::clone(&id)));
+                mutation(txn.side_effect(&id));
                 txn.build_capsule_or_panic(id);
             });
         } else {
@@ -439,13 +439,13 @@ impl CapsuleManager {
         log::trace!("Building {} ({:?})", std::any::type_name::<C>(), id);
 
         let new_data = {
-            let (capsule, mut side_effect) = txn.take_capsule_and_side_effect(Arc::clone(&id));
+            let (capsule, mut side_effect) = txn.take_capsule_and_side_effect(&id);
 
             let rebuilder = {
                 let rebuilder = txn.rebuilder.clone();
-                let id = id.clone();
+                let id = Arc::clone(&id);
                 Box::new(move |mutation: Box<dyn FnOnce(&mut Box<_>)>| {
-                    rebuilder.rebuild(id.clone(), |effect| {
+                    rebuilder.rebuild(Arc::clone(&id), |effect| {
                         let effect = effect.get_mut().expect(concat!(
                             "The side effect must've been previously initialized ",
                             "in order to use the rebuilder"
@@ -463,7 +463,7 @@ impl CapsuleManager {
                     register: SideEffectRegistrar::new(&mut side_effect, rebuilder),
                 });
 
-            txn.yield_capsule_and_side_effect(Arc::clone(&id), capsule, side_effect);
+            txn.yield_capsule_and_side_effect(&id, capsule, side_effect);
 
             new_data
         };
