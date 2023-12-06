@@ -68,7 +68,7 @@ where
     }
 
     // Unfortunately, negative trait impls don't exist yet.
-    // If they did, this would have a separate impl for PartialEq/Eq.
+    // If they did, this would have a separate impl for T: Eq.
     fn eq(_old: &Self::Data, _new: &Self::Data) -> bool {
         false
     }
@@ -704,7 +704,7 @@ mod tests {
             type Data = u32;
 
             fn build(&self, CapsuleHandle { mut get, .. }: CapsuleHandle) -> Self::Data {
-                increment_build_count(UnchangingIdempotentDep);
+                increment_build_count(Self);
                 _ = get.get(stateful);
                 0
             }
@@ -719,7 +719,7 @@ mod tests {
             type Data = u32;
 
             fn build(&self, CapsuleHandle { mut get, .. }: CapsuleHandle) -> Self::Data {
-                increment_build_count(UnchangingWatcher);
+                increment_build_count(Self);
                 get.get(UnchangingIdempotentDep)
             }
 
@@ -733,7 +733,7 @@ mod tests {
             type Data = u32;
 
             fn build(&self, CapsuleHandle { mut get, .. }: CapsuleHandle) -> Self::Data {
-                increment_build_count(ChangingIdempotentDep);
+                increment_build_count(Self);
                 get.get(stateful).0
             }
 
@@ -747,7 +747,7 @@ mod tests {
             type Data = u32;
 
             fn build(&self, CapsuleHandle { mut get, .. }: CapsuleHandle) -> Self::Data {
-                increment_build_count(ChangingWatcher);
+                increment_build_count(Self);
                 get.get(ChangingIdempotentDep)
             }
 
@@ -819,6 +819,108 @@ mod tests {
         assert_eq!(get_build_count(ChangingIdempotentDep), 4);
         assert_eq!(get_build_count(UnchangingWatcher), 3);
         assert_eq!(get_build_count(ChangingWatcher), 4);
+    }
+
+    #[test]
+    fn fib_dynamic_capsules() {
+        struct FibCapsule(u8);
+        impl Capsule for FibCapsule {
+            type Data = u128;
+
+            fn build(&self, CapsuleHandle { mut get, .. }: CapsuleHandle) -> Self::Data {
+                let Self(n) = self;
+                match n {
+                    0 => 0,
+                    1 => 1,
+                    n => get.get(Self(n - 1)) + get.get(Self(n - 2)),
+                }
+            }
+
+            fn eq(old: &Self::Data, new: &Self::Data) -> bool {
+                old == new
+            }
+
+            fn key(&self) -> CapsuleKey {
+                let Self(id) = self;
+                id.to_le_bytes().as_ref().to_owned().into()
+            }
+        }
+
+        let container = Container::new();
+        assert_eq!(container.read(FibCapsule(100)), 354_224_848_179_261_915_075);
+    }
+
+    #[test]
+    fn dynamic_capsules_remain_isolated() {
+        struct A(u8);
+        impl Capsule for A {
+            type Data = u8;
+
+            fn build(&self, _: CapsuleHandle) -> Self::Data {
+                self.0
+            }
+
+            fn eq(old: &Self::Data, new: &Self::Data) -> bool {
+                old == new
+            }
+
+            fn key(&self) -> CapsuleKey {
+                vec![self.0].into()
+            }
+        }
+        struct B(u8);
+        impl Capsule for B {
+            type Data = u8;
+
+            fn build(&self, _: CapsuleHandle) -> Self::Data {
+                self.0 + 1
+            }
+
+            fn eq(old: &Self::Data, new: &Self::Data) -> bool {
+                old == new
+            }
+
+            fn key(&self) -> CapsuleKey {
+                vec![self.0].into()
+            }
+        }
+
+        // A and B will have the same bytes in their keys, but should remain separate
+        let container = Container::new();
+        assert_eq!(container.read(A(0)), 0);
+        assert_eq!(container.read(B(0)), 1);
+    }
+
+    #[test]
+    fn dynamic_and_static_capsules() {
+        fn stateful(CapsuleHandle { register, .. }: CapsuleHandle) -> (u8, impl CData + Fn(u8)) {
+            let (state, set_state) = register.register(side_effects::state(0));
+            (*state, set_state)
+        }
+        struct Cell(u8);
+        impl Capsule for Cell {
+            type Data = u8;
+
+            fn build(&self, CapsuleHandle { mut get, .. }: CapsuleHandle) -> Self::Data {
+                self.0 + get.get(stateful).0
+            }
+
+            fn eq(old: &Self::Data, new: &Self::Data) -> bool {
+                old == new
+            }
+
+            fn key(&self) -> CapsuleKey {
+                vec![self.0].into()
+            }
+        }
+        fn sink(CapsuleHandle { mut get, .. }: CapsuleHandle) -> (u8, u8) {
+            (get.get(Cell(0)), get.get(Cell(1)))
+        }
+
+        let container = Container::new();
+        assert_eq!(container.read(sink), (0, 1));
+        container.read(stateful).1(1);
+        assert_eq!(container.read(sink), (1, 2));
     }
 
     // We use a more sophisticated graph here for a more thorough test of all functionality
