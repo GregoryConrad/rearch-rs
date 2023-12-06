@@ -79,7 +79,7 @@ where
 /// Most applications are just fine with static/function capsules.
 /// If you are making an incremental computation focused application,
 /// then you may need dynamic capsules.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, PartialEq, Eq, Hash)]
 pub enum CapsuleKey {
     /// A static capsule that is identified by its [`TypeId`].
     Static,
@@ -92,7 +92,7 @@ impl From<Vec<u8>> for CapsuleKey {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, PartialEq, Eq, Hash)]
 struct InternalKey {
     // We need to have a copy of the capsule's type to include in the Hash + Eq
     // so that if two capsules of different types have the same bytes as their key,
@@ -100,15 +100,16 @@ struct InternalKey {
     capsule_type: TypeId,
     capsule_key: CapsuleKey,
 }
-trait CreateInternalKey {
-    fn internal_key(&self) -> InternalKey;
+type Id = Arc<InternalKey>;
+trait CreateId {
+    fn id(&self) -> Id;
 }
-impl<C: Capsule> CreateInternalKey for C {
-    fn internal_key(&self) -> InternalKey {
-        InternalKey {
+impl<C: Capsule> CreateId for C {
+    fn id(&self) -> Id {
+        Arc::new(InternalKey {
             capsule_type: TypeId::of::<C>(),
             capsule_key: self.key(),
-        }
+        })
     }
 }
 
@@ -128,8 +129,8 @@ impl<T: Clone + Send + Sync + 'static> CData for T {}
 
 /// The handle given to [`Capsule`]s in order to [`Capsule::build`] their [`Capsule::Data`].
 /// See [`CapsuleReader`] and [`SideEffectRegistrar`] for more.
-pub struct CapsuleHandle<'key, 'txn_scope, 'txn_total, 'build> {
-    pub get: CapsuleReader<'key, 'txn_scope, 'txn_total>,
+pub struct CapsuleHandle<'txn_scope, 'txn_total, 'build> {
+    pub get: CapsuleReader<'txn_scope, 'txn_total>,
     pub register: SideEffectRegistrar<'build>,
 }
 
@@ -298,7 +299,7 @@ impl Container {
 /// that acts as your listener. When you normally would call `container.listen()`,
 /// instead call `container.read(my_nonidempotent_listener)` to initialize it.
 pub struct ListenerHandle {
-    id: InternalKey,
+    id: Id,
     store: Weak<ContainerStore>,
 }
 impl Drop for ListenerHandle {
@@ -306,7 +307,7 @@ impl Drop for ListenerHandle {
         if let Some(store) = self.store.upgrade() {
             // Note: The node is guaranteed to be in the graph here since it is a listener.
             let rebuilder = CapsuleRebuilder(Weak::clone(&self.store));
-            store.with_write_txn(rebuilder, |txn| txn.dispose_node(&self.id));
+            store.with_write_txn(rebuilder, |txn| txn.dispose_node(Arc::clone(&self.id)));
         }
     }
 }
@@ -349,8 +350,8 @@ generate_capsule_list_impl!(A, B, C, D, E, F, G, H);
 /// All capsule data is stored within `data`, and all data flow graph nodes are stored in `nodes`.
 #[derive(Default)]
 struct ContainerStore {
-    data: concread::hashmap::HashMap<InternalKey, Box<dyn CapsuleData>>,
-    nodes: Mutex<std::collections::HashMap<InternalKey, CapsuleManager>>,
+    data: concread::hashmap::HashMap<Id, Box<dyn CapsuleData>>,
+    nodes: Mutex<std::collections::HashMap<Id, CapsuleManager>>,
 }
 impl ContainerStore {
     fn with_read_txn<R>(&self, to_run: impl FnOnce(&ContainerReadTxn) -> R) -> R {
@@ -379,7 +380,7 @@ impl ContainerStore {
 #[derive(Clone)]
 struct CapsuleRebuilder(Weak<ContainerStore>);
 impl CapsuleRebuilder {
-    fn rebuild(&self, id: InternalKey, mutation: impl FnOnce(&mut OnceCell<Box<dyn Any + Send>>)) {
+    fn rebuild(&self, id: Id, mutation: impl FnOnce(&mut OnceCell<Box<dyn Any + Send>>)) {
         #[allow(clippy::option_if_let_else)]
         if let Some(store) = self.0.upgrade() {
             #[cfg(feature = "logging")]
@@ -391,8 +392,8 @@ impl CapsuleRebuilder {
             store.with_write_txn(self.clone(), |txn| {
                 // We have the txn now, so that means we also hold the data & nodes lock.
                 // Thus, this is where we should run the supplied mutation.
-                mutation(txn.side_effect(&id));
-                txn.build_capsule_or_panic(&id);
+                mutation(txn.side_effect(Arc::clone(&id)));
+                txn.build_capsule_or_panic(id);
             });
         } else {
             #[cfg(feature = "logging")]
@@ -416,9 +417,9 @@ const EXCLUSIVE_OWNER_MSG: &str =
 struct CapsuleManager {
     capsule: Option<Box<dyn Any + Send>>,
     side_effect: Option<OnceCell<Box<dyn Any + Send>>>,
-    dependencies: HashSet<InternalKey>,
-    dependents: HashSet<InternalKey>,
-    build: fn(InternalKey, &mut ContainerWriteTxn) -> bool,
+    dependencies: HashSet<Id>,
+    dependents: HashSet<Id>,
+    build: fn(Id, &mut ContainerWriteTxn) -> bool,
 }
 
 impl CapsuleManager {
@@ -433,12 +434,12 @@ impl CapsuleManager {
     }
 
     // Builds a capsule's new data and puts it into the txn, returning true when the data changes.
-    fn build<C: Capsule>(id: InternalKey, txn: &mut ContainerWriteTxn) -> bool {
+    fn build<C: Capsule>(id: Id, txn: &mut ContainerWriteTxn) -> bool {
         #[cfg(feature = "logging")]
         log::trace!("Building {} ({:?})", std::any::type_name::<C>(), id);
 
         let new_data = {
-            let (capsule, mut side_effect) = txn.take_capsule_and_side_effect(&id);
+            let (capsule, mut side_effect) = txn.take_capsule_and_side_effect(Arc::clone(&id));
 
             let rebuilder = {
                 let rebuilder = txn.rebuilder.clone();
@@ -458,11 +459,11 @@ impl CapsuleManager {
                 .downcast_ref::<C>()
                 .expect("Types should be properly enforced due to generics")
                 .build(CapsuleHandle {
-                    get: CapsuleReader::new(&id, txn),
+                    get: CapsuleReader::new(Arc::clone(&id), txn),
                     register: SideEffectRegistrar::new(&mut side_effect, rebuilder),
                 });
 
-            txn.yield_capsule_and_side_effect(&id, capsule, side_effect);
+            txn.yield_capsule_and_side_effect(Arc::clone(&id), capsule, side_effect);
 
             new_data
         };
@@ -477,7 +478,7 @@ impl CapsuleManager {
             })
             .map_or(true, |old_data| !C::eq(&old_data, &new_data));
 
-        txn.data.insert(id.clone(), Box::new(new_data));
+        txn.data.insert(id, Box::new(new_data));
 
         did_change
     }
