@@ -500,11 +500,10 @@ impl CapsuleManager {
 mod tests {
     use crate::*;
 
-    /// Check for Container: Send + Sync
-    #[allow(unused)]
-    mod container_thread_safe {
-        struct SyncSendCheck<T: Send + Sync>(T);
-        const fn foo(bar: &SyncSendCheck<crate::Container>) {}
+    #[test]
+    fn container_send_sync() {
+        fn assert_send_sync<T: Send + Sync>() {}
+        assert_send_sync::<crate::Container>()
     }
 
     /// Check for some fundamental functionality with the classic count example
