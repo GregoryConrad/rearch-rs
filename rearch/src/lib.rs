@@ -37,6 +37,7 @@ pub trait Capsule: Send + 'static {
     /// Builds the capsule's immutable data using a given snapshot of the data flow graph.
     /// (The snapshot, a `ContainerWriteTxn`, is abstracted away for you via [`CapsuleHandle`].)
     ///
+    /// # Concurrency
     /// ABSOLUTELY DO NOT TRIGGER ANY REBUILDS WITHIN THIS FUNCTION!
     /// Doing so will result in a deadlock.
     fn build(&self, handle: CapsuleHandle) -> Self::Data;
@@ -53,7 +54,7 @@ pub trait Capsule: Send + 'static {
     /// you will need to implement this function.
     /// See [`CapsuleKey`] for more.
     fn key(&self) -> CapsuleKey {
-        CapsuleKey::Static
+        CapsuleKey(CapsuleKeyType::Static)
     }
 }
 impl<T, F> Capsule for F
@@ -79,36 +80,44 @@ where
 /// Most applications are just fine with static/function capsules.
 /// If you are making an incremental computation focused application,
 /// then you may need dynamic capsules.
+pub struct CapsuleKey(CapsuleKeyType);
+impl CapsuleKey {
+    #[must_use]
+    pub fn bytes(bytes: Vec<u8>) -> Self {
+        Self(CapsuleKeyType::Bytes(bytes))
+    }
+}
+impl From<Vec<u8>> for CapsuleKey {
+    fn from(bytes: Vec<u8>) -> Self {
+        Self::bytes(bytes)
+    }
+}
+
 #[derive(Debug, PartialEq, Eq, Hash)]
-pub enum CapsuleKey {
+enum CapsuleKeyType {
     /// A static capsule that is identified by its [`TypeId`].
     Static,
     /// A dynamic capsule, whose key is the supplied bytes.
     Bytes(Vec<u8>),
 }
-impl From<Vec<u8>> for CapsuleKey {
-    fn from(bytes: Vec<u8>) -> Self {
-        Self::Bytes(bytes)
-    }
-}
 
 #[derive(Debug, PartialEq, Eq, Hash)]
-struct InternalKey {
+struct InternalCapsuleKey {
     // We need to have a copy of the capsule's type to include in the Hash + Eq
     // so that if two capsules of different types have the same bytes as their key,
     // they won't be kept under the same entry in the map.
     capsule_type: TypeId,
-    capsule_key: CapsuleKey,
+    capsule_key: CapsuleKeyType,
 }
-type Id = Arc<InternalKey>;
+type Id = Arc<InternalCapsuleKey>;
 trait CreateId {
     fn id(&self) -> Id;
 }
 impl<C: Capsule> CreateId for C {
     fn id(&self) -> Id {
-        Arc::new(InternalKey {
+        Arc::new(InternalCapsuleKey {
             capsule_type: TypeId::of::<C>(),
-            capsule_key: self.key(),
+            capsule_key: self.key().0,
         })
     }
 }
