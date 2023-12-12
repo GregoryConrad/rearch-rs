@@ -81,15 +81,9 @@ where
 /// If you are making an incremental computation focused application,
 /// then you may need dynamic capsules.
 pub struct CapsuleKey(CapsuleKeyType);
-impl CapsuleKey {
-    #[must_use]
-    pub fn bytes(bytes: Vec<u8>) -> Self {
-        Self(CapsuleKeyType::Bytes(bytes))
-    }
-}
 impl From<Vec<u8>> for CapsuleKey {
     fn from(bytes: Vec<u8>) -> Self {
-        Self::bytes(bytes)
+        Self(CapsuleKeyType::Bytes(bytes))
     }
 }
 
