@@ -3,25 +3,22 @@ use std::{any::Any, collections::HashMap};
 use crate::{Capsule, CapsuleData, ContainerWriteTxn, CreateId, Id};
 
 /// Allows you to read the current data of capsules based on the given state of the container txn.
-pub enum CapsuleReader<'scope, 'total> {
-    // For normal operation
-    Normal(NormalCapsuleReader<'scope, 'total>),
-    // To enable easy mocking in testing
-    Mock(MockCapsuleReader),
-}
-#[allow(clippy::module_name_repetitions)]
-pub struct NormalCapsuleReader<'scope, 'total> {
-    id: Id,
-    txn: &'scope mut ContainerWriteTxn<'total>,
-}
-#[allow(clippy::module_name_repetitions)]
-pub struct MockCapsuleReader {
-    mocks: HashMap<Id, Box<dyn CapsuleData>>,
+pub struct CapsuleReader<'scope, 'total>(InternalCapsuleReader<'scope, 'total>);
+enum InternalCapsuleReader<'scope, 'total> {
+    /// For normal CapsuleReader operation
+    Normal {
+        id: Id,
+        txn: &'scope mut ContainerWriteTxn<'total>,
+    },
+    /// To enable easy mocking in testing
+    Mock {
+        mocks: HashMap<Id, Box<dyn CapsuleData>>,
+    },
 }
 
 impl<'scope, 'total> CapsuleReader<'scope, 'total> {
     pub(crate) fn new(id: Id, txn: &'scope mut ContainerWriteTxn<'total>) -> Self {
-        Self::Normal(NormalCapsuleReader { id, txn })
+        Self(InternalCapsuleReader::Normal { id, txn })
     }
 
     /// Reads the current data of the supplied capsule, initializing it if needed.
@@ -29,10 +26,11 @@ impl<'scope, 'total> CapsuleReader<'scope, 'total> {
     /// this function in case you only conditionally need a capsule's data.
     ///
     /// # Panics
-    /// Panics when a capsule attempts to read itself in its first build.
+    /// Panics when a capsule attempts to read itself in its first build,
+    /// or when a mocked [`CapsuleReader`] attempts to read a capsule's data that wasn't mocked.
     pub fn get<C: Capsule>(&mut self, capsule: C) -> C::Data {
-        match self {
-            CapsuleReader::Normal(NormalCapsuleReader { ref id, txn }) => {
+        match &mut self.0 {
+            InternalCapsuleReader::Normal { ref id, txn } => {
                 let (this, other) = (id, capsule.id());
                 if this == &other {
                     return txn.try_read(&capsule).unwrap_or_else(|| {
@@ -51,7 +49,7 @@ impl<'scope, 'total> CapsuleReader<'scope, 'total> {
                 txn.add_dependency_relationship(other, this);
                 data
             }
-            CapsuleReader::Mock(MockCapsuleReader { mocks }) => {
+            InternalCapsuleReader::Mock { mocks } => {
                 let id = capsule.id();
                 let any: Box<dyn Any> = mocks
                     .get(&id)
@@ -102,6 +100,6 @@ impl MockCapsuleReaderBuilder {
 
     #[must_use]
     pub fn build(self) -> CapsuleReader<'static, 'static> {
-        CapsuleReader::Mock(MockCapsuleReader { mocks: self.0 })
+        CapsuleReader(InternalCapsuleReader::Mock { mocks: self.0 })
     }
 }
