@@ -1,6 +1,52 @@
 
 
+## v0.5.0 (2023-12-12)
+
+### Chore
+
+ - <csr-id-d42b38de26bd5f585e3c69728e7f4a7c40723cf1/> rearch version bump
+
+### Documentation
+
+ - <csr-id-89181fc1885778207f05cdfcb774a085b204a13b/> update/fix SideEffectRegistrar docs
+
+### Test
+
+ - <csr-id-89fef501de6d90bf0a0779720237fdc3f2366fd4/> rewrite container thread safe test to be more idiomatic
+
+### Refactor (BREAKING)
+
+ - <csr-id-50c1439b2fba9893152fbe7fc7c051c7146d2efb/> remove redundant CapsuleKey bytes() API
+ - <csr-id-bd8ff2cd5d4125bf8a41dfdb36a384c272b751b5/> hide more API members to permit future modification
+ - <csr-id-302bf1364305b776c9c06abe25838f51504482aa/> improve/stabilize the CapsuleReader API
+
+### Commit Statistics
+
+<csr-read-only-do-not-edit/>
+
+ - 6 commits contributed to the release.
+ - 5 days passed between releases.
+ - 6 commits were understood as [conventional](https://www.conventionalcommits.org).
+ - 0 issues like '(#ID)' were seen in commit messages
+
+### Commit Details
+
+<csr-read-only-do-not-edit/>
+
+<details><summary>view details</summary>
+
+ * **Uncategorized**
+    - Rearch version bump ([`d42b38d`](https://github.com/GregoryConrad/rearch-rs/commit/d42b38de26bd5f585e3c69728e7f4a7c40723cf1))
+    - Rewrite container thread safe test to be more idiomatic ([`89fef50`](https://github.com/GregoryConrad/rearch-rs/commit/89fef501de6d90bf0a0779720237fdc3f2366fd4))
+    - Remove redundant CapsuleKey bytes() API ([`50c1439`](https://github.com/GregoryConrad/rearch-rs/commit/50c1439b2fba9893152fbe7fc7c051c7146d2efb))
+    - Hide more API members to permit future modification ([`bd8ff2c`](https://github.com/GregoryConrad/rearch-rs/commit/bd8ff2cd5d4125bf8a41dfdb36a384c272b751b5))
+    - Update/fix SideEffectRegistrar docs ([`89181fc`](https://github.com/GregoryConrad/rearch-rs/commit/89181fc1885778207f05cdfcb774a085b204a13b))
+    - Improve/stabilize the CapsuleReader API ([`302bf13`](https://github.com/GregoryConrad/rearch-rs/commit/302bf1364305b776c9c06abe25838f51504482aa))
+</details>
+
 ## v0.4.2 (2023-12-06)
+
+<csr-id-4cb3de4f45d014a6a1edd130cfcd50b227604b34/>
 
 ### Chore
 
@@ -14,7 +60,7 @@
 
 <csr-read-only-do-not-edit/>
 
- - 2 commits contributed to the release.
+ - 3 commits contributed to the release.
  - 6 days passed between releases.
  - 2 commits were understood as [conventional](https://www.conventionalcommits.org).
  - 1 unique issue was worked on: [#10](https://github.com/GregoryConrad/rearch-rs/issues/10)
@@ -28,6 +74,7 @@
  * **[#10](https://github.com/GregoryConrad/rearch-rs/issues/10)**
     - Add dynamic capsule support ([`1d336b5`](https://github.com/GregoryConrad/rearch-rs/commit/1d336b50adfe7dc43962ac6188fa4b21342d025a))
  * **Uncategorized**
+    - Release rearch v0.4.2 ([`966bedd`](https://github.com/GregoryConrad/rearch-rs/commit/966bedd4f47d383d7f835dfdde5d32f1508638c0))
     - Update version numbers ([`4cb3de4`](https://github.com/GregoryConrad/rearch-rs/commit/4cb3de4f45d014a6a1edd130cfcd50b227604b34))
 </details>
 
