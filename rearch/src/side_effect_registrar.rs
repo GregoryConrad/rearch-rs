@@ -19,17 +19,18 @@ const PREVIOUS_INIT_FAILED_MSG: &str = "Side effect should've been initialized a
 /// You can only call register once on purpose (it consumes self);
 /// to register multiple side effects, simply pass them in together!
 /// If you have an idempotent capsule that you wish to make non-idempotent,
-/// simply call `register()` with no arguments.
+/// simply call `register()` with no arguments (or use the `as_listener()` side effect).
 pub struct SideEffectRegistrar<'a> {
     side_effect: &'a mut OnceCell<Box<dyn Any + Send>>,
     rebuilder: Box<dyn SideEffectRebuilder>,
 }
 
 impl<'a> SideEffectRegistrar<'a> {
+    #[allow(clippy::doc_markdown)]
     /// Creates a new `SideEffectRegistrar`.
     ///
     /// This is public only to enable easier mocking in your code,
-    /// or for other libraries looking to integrate deeply with rearch;
+    /// or for other libraries looking to integrate deeply with ReArch;
     /// do not use this method in other contexts.
     pub fn new(
         side_effect: &'a mut OnceCell<Box<dyn Any + Send>>,
