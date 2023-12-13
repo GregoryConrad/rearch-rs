@@ -1,45 +1,39 @@
 use concread::hashmap::{HashMapReadTxn, HashMapWriteTxn};
 use std::{any::Any, cell::OnceCell, collections::HashSet, sync::Arc};
 
-use crate::{
-    Capsule, CapsuleData, CapsuleManager, CapsuleRebuilder, CreateId, Id, EXCLUSIVE_OWNER_MSG,
-};
+use crate::{Capsule, CapsuleManager, CapsuleRebuilder, CreateId, Id, EXCLUSIVE_OWNER_MSG};
 
-#[allow(clippy::module_name_repetitions)]
+#[allow(clippy::module_name_repetitions)] // re-exported at crate level (not in module)
 pub struct ContainerReadTxn<'a> {
-    data: HashMapReadTxn<'a, Id, Box<dyn CapsuleData>>,
+    data: HashMapReadTxn<'a, Id, Arc<dyn Any + Send + Sync>>,
 }
 
 impl<'a> ContainerReadTxn<'a> {
-    pub(crate) fn new(data: HashMapReadTxn<'a, Id, Box<dyn CapsuleData>>) -> Self {
+    pub(crate) fn new(data: HashMapReadTxn<'a, Id, Arc<dyn Any + Send + Sync>>) -> Self {
         Self { data }
     }
 }
 
 impl ContainerReadTxn<'_> {
     #[must_use]
-    #[allow(clippy::missing_panics_doc)]
     pub fn try_read<C: Capsule>(&self, capsule: &C) -> Option<C::Data> {
-        let id = capsule.id();
-        self.data.get(&id).map(|data| {
-            let data: Box<dyn Any> = data.clone();
-            *data
-                .downcast::<C::Data>()
-                .expect("Types should be properly enforced due to generics")
-        })
+        self.data
+            .get(&capsule.id())
+            .map(crate::downcast_capsule_data::<C>)
+            .map(dyn_clone::clone)
     }
 }
 
-#[allow(clippy::module_name_repetitions)]
+#[allow(clippy::module_name_repetitions)] // re-exported at crate level (not in module)
 pub struct ContainerWriteTxn<'a> {
     pub(crate) rebuilder: CapsuleRebuilder,
-    pub(crate) data: HashMapWriteTxn<'a, Id, Box<dyn CapsuleData>>,
+    pub(crate) data: HashMapWriteTxn<'a, Id, Arc<dyn Any + Send + Sync>>,
     nodes: &'a mut std::collections::HashMap<Id, CapsuleManager>,
 }
 
 impl<'a> ContainerWriteTxn<'a> {
     pub(crate) fn new(
-        data: HashMapWriteTxn<'a, Id, Box<dyn CapsuleData>>,
+        data: HashMapWriteTxn<'a, Id, Arc<dyn Any + Send + Sync>>,
         nodes: &'a mut std::collections::HashMap<Id, CapsuleManager>,
         rebuilder: CapsuleRebuilder,
     ) -> Self {
@@ -52,7 +46,7 @@ impl<'a> ContainerWriteTxn<'a> {
 }
 
 impl ContainerWriteTxn<'_> {
-    #[allow(clippy::missing_panics_doc)]
+    #[allow(clippy::missing_panics_doc)] // false positive
     pub fn read_or_init<C: Capsule>(&mut self, capsule: C) -> C::Data {
         let id = capsule.id();
 
@@ -73,12 +67,10 @@ impl ContainerWriteTxn<'_> {
     }
 
     fn try_read_raw<C: Capsule>(&self, id: &Id) -> Option<C::Data> {
-        self.data.get(id).map(|data| {
-            let data: Box<dyn Any> = data.clone();
-            *data
-                .downcast::<C::Data>()
-                .expect("Types should be properly enforced due to generics")
-        })
+        self.data
+            .get(id)
+            .map(crate::downcast_capsule_data::<C>)
+            .map(dyn_clone::clone)
     }
 
     /// Forcefully disposes only the requested node, cleaning up the node's direct dependencies.
