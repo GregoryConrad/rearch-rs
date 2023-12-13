@@ -606,6 +606,32 @@ mod tests {
         assert_eq!(2, s2);
     }
 
+    #[cfg(feature = "better-api")]
+    #[test]
+    fn get_and_register() {
+        fn rebuildable(CapsuleHandle { register, .. }: CapsuleHandle) -> impl CData + Fn() {
+            register(side_effects::rebuilder(), side_effects::as_listener()).0
+        }
+
+        fn build_counter(CapsuleHandle { mut get, register }: CapsuleHandle) -> usize {
+            get(rebuildable); // mark dep
+
+            let is_first_build = register(side_effects::is_first_build());
+            if is_first_build {
+                1
+            } else {
+                get(build_counter) + 1
+            }
+        }
+
+        let container = Container::new();
+        assert_eq!(container.read(build_counter), 1);
+        container.read(rebuildable)();
+        assert_eq!(container.read(build_counter), 2);
+        container.read(rebuildable)();
+        assert_eq!(container.read(build_counter), 3);
+    }
+
     /*
         #[test]
         fn listener_gets_updates() {
