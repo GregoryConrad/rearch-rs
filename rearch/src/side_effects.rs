@@ -25,7 +25,7 @@ pub fn state<'a, T: Send + 'static>(
 
 // This uses a hacked together Lazy implementation because LazyCell doesn't have force_mut;
 // see https://github.com/rust-lang/rust/issues/109736#issuecomment-1605787094
-#[allow(clippy::missing_panics_doc)]
+#[allow(clippy::missing_panics_doc)] // false positive
 pub fn lazy_state<'a, T, F>(init: F) -> impl SideEffect<'a, Api = (&'a mut T, impl CData + Fn(T))>
 where
     T: Send + 'static,
@@ -54,7 +54,7 @@ pub fn value<'a, T: Send + 'static>(value: T) -> impl SideEffect<'a, Api = &'a m
 
 // This uses a hacked together Lazy implementation because LazyCell doesn't have force_mut;
 // see https://github.com/rust-lang/rust/issues/109736#issuecomment-1605787094
-#[allow(clippy::missing_panics_doc)]
+#[allow(clippy::missing_panics_doc)] // false positive
 pub fn lazy_value<'a, T, F>(init: F) -> impl SideEffect<'a, Api = &'a mut T>
 where
     T: Send + 'static,

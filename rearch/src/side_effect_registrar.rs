@@ -26,7 +26,7 @@ pub struct SideEffectRegistrar<'a> {
 }
 
 impl<'a> SideEffectRegistrar<'a> {
-    #[allow(clippy::doc_markdown)]
+    #[allow(clippy::doc_markdown)] // false positive
     /// Creates a new `SideEffectRegistrar`.
     ///
     /// This is public only to enable easier mocking in your code,

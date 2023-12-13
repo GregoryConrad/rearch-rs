@@ -5,6 +5,7 @@ use std::{
     any::{Any, TypeId},
     cell::OnceCell,
     collections::HashSet,
+    ops::Deref,
     sync::{Arc, Mutex, Weak},
 };
 
@@ -353,7 +354,7 @@ generate_capsule_list_impl!(A, B, C, D, E, F, G, H);
 /// All capsule data is stored within `data`, and all data flow graph nodes are stored in `nodes`.
 #[derive(Default)]
 struct ContainerStore {
-    data: concread::hashmap::HashMap<Id, Box<dyn CapsuleData>>,
+    data: concread::hashmap::HashMap<Id, Arc<dyn Any + Send + Sync>>,
     nodes: Mutex<std::collections::HashMap<Id, CapsuleManager>>,
 }
 impl ContainerStore {
@@ -362,6 +363,7 @@ impl ContainerStore {
         to_run(&txn)
     }
 
+    #[allow(clippy::significant_drop_tightening)] // false positive
     fn with_write_txn<R>(
         &self,
         rebuilder: CapsuleRebuilder,
@@ -384,7 +386,7 @@ impl ContainerStore {
 struct CapsuleRebuilder(Weak<ContainerStore>);
 impl CapsuleRebuilder {
     fn rebuild(&self, id: Id, mutation: impl FnOnce(&mut OnceCell<Box<dyn Any + Send>>)) {
-        #[allow(clippy::option_if_let_else)]
+        #[allow(clippy::option_if_let_else)] // results in less readable code
         if let Some(store) = self.0.upgrade() {
             #[cfg(feature = "logging")]
             log::debug!("Rebuilding Capsule ({:?})", id);
@@ -406,6 +408,11 @@ impl CapsuleRebuilder {
             );
         }
     }
+}
+
+fn downcast_capsule_data<C: Capsule>(x: &impl Deref<Target = dyn Any + Send + Sync>) -> &C::Data {
+    x.downcast_ref::<C::Data>()
+        .expect("Types should be properly enforced due to generics")
 }
 
 const EXCLUSIVE_OWNER_MSG: &str =
@@ -474,14 +481,12 @@ impl CapsuleManager {
         let did_change = txn
             .data
             .remove(&id)
-            .map(|old_data| {
-                let any: Box<dyn Any> = old_data;
-                *any.downcast::<C::Data>()
-                    .expect("Types should be properly enforced due to generics")
-            })
+            .as_ref()
+            .map(downcast_capsule_data::<C>)
+            .map(dyn_clone::clone)
             .map_or(true, |old_data| !C::eq(&old_data, &new_data));
 
-        txn.data.insert(id, Box::new(new_data));
+        txn.data.insert(id, Arc::new(new_data));
 
         did_change
     }
@@ -496,7 +501,6 @@ impl CapsuleManager {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::missing_const_for_fn)]
 mod tests {
     use crate::*;
 

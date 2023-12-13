@@ -1,6 +1,6 @@
-use std::{any::Any, collections::HashMap};
+use std::{any::Any, collections::HashMap, sync::Arc};
 
-use crate::{Capsule, CapsuleData, ContainerWriteTxn, CreateId, Id};
+use crate::{Capsule, ContainerWriteTxn, CreateId, Id};
 
 /// Allows you to read the current data of capsules based on the given state of the container txn.
 pub struct CapsuleReader<'scope, 'total>(InternalCapsuleReader<'scope, 'total>);
@@ -12,7 +12,7 @@ enum InternalCapsuleReader<'scope, 'total> {
     },
     /// To enable easy mocking in testing
     Mock {
-        mocks: HashMap<Id, Box<dyn CapsuleData>>,
+        mocks: HashMap<Id, Arc<dyn Any + Send + Sync>>,
     },
 }
 
@@ -51,8 +51,11 @@ impl<'scope, 'total> CapsuleReader<'scope, 'total> {
             }
             InternalCapsuleReader::Mock { mocks } => {
                 let id = capsule.id();
-                let any: Box<dyn Any> = mocks
+                #[allow(clippy::map_unwrap_or)] // suggestion is ugly/hard to read
+                mocks
                     .get(&id)
+                    .map(crate::downcast_capsule_data::<C>)
+                    .map(dyn_clone::clone)
                     .unwrap_or_else(|| {
                         panic!(
                             "Mock CapsuleReader was used to read {} ({id:?}) {}",
@@ -60,9 +63,6 @@ impl<'scope, 'total> CapsuleReader<'scope, 'total> {
                             "when it was not included in the mock!"
                         );
                     })
-                    .clone();
-                *any.downcast::<C::Data>()
-                    .expect("Types should be properly enforced due to generics")
             }
         }
     }
@@ -84,7 +84,7 @@ impl<A: Capsule> FnMut<(A,)> for CapsuleReader<'_, '_> {
 }
 
 #[derive(Clone, Default)]
-pub struct MockCapsuleReaderBuilder(HashMap<Id, Box<dyn CapsuleData>>);
+pub struct MockCapsuleReaderBuilder(HashMap<Id, Arc<dyn Any + Send + Sync>>);
 
 impl MockCapsuleReaderBuilder {
     #[must_use]
@@ -94,7 +94,7 @@ impl MockCapsuleReaderBuilder {
 
     #[must_use]
     pub fn set<C: Capsule>(mut self, capsule: &C, data: C::Data) -> Self {
-        self.0.insert(capsule.id(), Box::new(data));
+        self.0.insert(capsule.id(), Arc::new(data));
         self
     }
 
