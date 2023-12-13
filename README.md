@@ -55,6 +55,7 @@ let container = Container::new();
 let ((count, increment_count), count_plus_one) = container.read((count, count_plus_one));
 ```
 
+
 ## Getting Started
 Simply run:
 `cargo add rearch`
@@ -74,12 +75,9 @@ Also, there is some WIP [documentation] that will help you learn the core concep
 
 
 ## Minimum Supported Rust Version (MSRV)
-The MSRV is currently 1.76.0 due to ReArch's dependency on
-[`trait_upcasting`](https://github.com/rust-lang/rust/issues/65991).
+The MSRV is currently 1.74.0 and may change in any new ReArch version/release.
 
-The MSRV will only increment on minor or major changes (minor/major in terms of semver).
-
-Further, it is worth mentioning that the example shown in "In a Nutshell" above requires nightly
+It is also worth mentioning that the example shown in "In a Nutshell" above requires nightly
 for `unboxed_closures` and `fn_traits`, which is feature-gated under the `better-api` feature.
 Once `unboxed_closures` and `fn_traits` stabilize,
 this nightly syntax will be the preferred syntax,
