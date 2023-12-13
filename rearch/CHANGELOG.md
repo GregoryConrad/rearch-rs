@@ -1,6 +1,46 @@
 
 
+## v0.5.1 (2023-12-13)
+
+### Chore
+
+ - <csr-id-66e664a6ae0160beea2874e924f64e3a5aba2154/> update rearch version number
+
+### Performance
+
+ - <csr-id-1ea4c0b922533a7a90bdee1baa63d53117414282/> wrap container values in Arc for faster clones
+
+### Test
+
+ - <csr-id-63a5c5e5042387f91fedf5a26e0d14a412fcc27e/> add better-api test for nightly
+
+### Commit Statistics
+
+<csr-read-only-do-not-edit/>
+
+ - 3 commits contributed to the release.
+ - 3 commits were understood as [conventional](https://www.conventionalcommits.org).
+ - 0 issues like '(#ID)' were seen in commit messages
+
+### Commit Details
+
+<csr-read-only-do-not-edit/>
+
+<details><summary>view details</summary>
+
+ * **Uncategorized**
+    - Update rearch version number ([`66e664a`](https://github.com/GregoryConrad/rearch-rs/commit/66e664a6ae0160beea2874e924f64e3a5aba2154))
+    - Add better-api test for nightly ([`63a5c5e`](https://github.com/GregoryConrad/rearch-rs/commit/63a5c5e5042387f91fedf5a26e0d14a412fcc27e))
+    - Wrap container values in Arc for faster clones ([`1ea4c0b`](https://github.com/GregoryConrad/rearch-rs/commit/1ea4c0b922533a7a90bdee1baa63d53117414282))
+</details>
+
 ## v0.5.0 (2023-12-12)
+
+<csr-id-d42b38de26bd5f585e3c69728e7f4a7c40723cf1/>
+<csr-id-89fef501de6d90bf0a0779720237fdc3f2366fd4/>
+<csr-id-50c1439b2fba9893152fbe7fc7c051c7146d2efb/>
+<csr-id-bd8ff2cd5d4125bf8a41dfdb36a384c272b751b5/>
+<csr-id-302bf1364305b776c9c06abe25838f51504482aa/>
 
 ### Chore
 
@@ -24,7 +64,7 @@
 
 <csr-read-only-do-not-edit/>
 
- - 6 commits contributed to the release.
+ - 7 commits contributed to the release.
  - 5 days passed between releases.
  - 6 commits were understood as [conventional](https://www.conventionalcommits.org).
  - 0 issues like '(#ID)' were seen in commit messages
@@ -36,6 +76,7 @@
 <details><summary>view details</summary>
 
  * **Uncategorized**
+    - Release rearch v0.5.0 ([`cbe7641`](https://github.com/GregoryConrad/rearch-rs/commit/cbe76417ff38ea079894793e5c53c803cc583656))
     - Rearch version bump ([`d42b38d`](https://github.com/GregoryConrad/rearch-rs/commit/d42b38de26bd5f585e3c69728e7f4a7c40723cf1))
     - Rewrite container thread safe test to be more idiomatic ([`89fef50`](https://github.com/GregoryConrad/rearch-rs/commit/89fef501de6d90bf0a0779720237fdc3f2366fd4))
     - Remove redundant CapsuleKey bytes() API ([`50c1439`](https://github.com/GregoryConrad/rearch-rs/commit/50c1439b2fba9893152fbe7fc7c051c7146d2efb))
