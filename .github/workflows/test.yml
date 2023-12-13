@@ -14,10 +14,7 @@ jobs:
     strategy:
       matrix:
         os: ["ubuntu-latest", "macos-latest", "windows-latest"]
-        toolchain: ["1.76.0", "stable"]
-        # NOTE: not using --all-features below since the better-api feature requires nightly
-        # and nightly clippy has some false positives
-        features: ["--no-default-features", "--features=logging"]
+        toolchain: ["1.74.0", "nightly"]
 
     runs-on: ${{ matrix.os }}
 
@@ -30,8 +27,11 @@ jobs:
 
       - name: Check format
         run: cargo fmt --all --check
-      - name: Code analysis
-        run: cargo clippy --workspace ${{ matrix.features }} -- -D warnings
+      - name: Code analysis (--no-default-features)
+        run: cargo clippy --workspace --no-default-features -- -D warnings
+      - name: Code analysis (--all-features)
+        if: matrix.toolchain == 'nightly' # better-api requires nightly
+        run: cargo clippy --workspace --all-features -- -D warnings
       - name: Run tests
         run: cargo test --workspace ${{ matrix.features }}
 
