@@ -18,8 +18,7 @@ impl Capsule for FibonacciCapsule {
     }
 
     fn key(&self) -> CapsuleKey {
-        let Self(id) = self;
-        id.to_le_bytes().as_ref().to_owned().into()
+        self.0.into()
     }
 }
 

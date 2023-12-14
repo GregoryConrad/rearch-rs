@@ -2,7 +2,7 @@
 
 use dyn_clone::DynClone;
 use std::{
-    any::{Any, TypeId},
+    any::Any,
     cell::OnceCell,
     collections::HashSet,
     ops::Deref,
@@ -10,6 +10,9 @@ use std::{
 };
 
 pub mod side_effects;
+
+mod capsule_key;
+pub use capsule_key::*;
 
 mod capsule_reader;
 pub use capsule_reader::*;
@@ -55,7 +58,7 @@ pub trait Capsule: Send + 'static {
     /// you will need to implement this function.
     /// See [`CapsuleKey`] for more.
     fn key(&self) -> CapsuleKey {
-        CapsuleKey(CapsuleKeyType::Static)
+        CapsuleKey::default()
     }
 }
 impl<T, F> Capsule for F
@@ -73,47 +76,6 @@ where
     // If they did, this would have a separate impl for T: Eq.
     fn eq(_old: &Self::Data, _new: &Self::Data) -> bool {
         false
-    }
-}
-
-/// Represents a key for a capsule.
-/// You'll only ever need to use this directly if you are making dynamic (runtime) capsules.
-/// Most applications are just fine with static/function capsules.
-/// If you are making an incremental computation focused application,
-/// then you may need dynamic capsules.
-pub struct CapsuleKey(CapsuleKeyType);
-impl From<Vec<u8>> for CapsuleKey {
-    fn from(bytes: Vec<u8>) -> Self {
-        Self(CapsuleKeyType::Bytes(bytes))
-    }
-}
-
-#[derive(Debug, PartialEq, Eq, Hash)]
-enum CapsuleKeyType {
-    /// A static capsule that is identified by its [`TypeId`].
-    Static,
-    /// A dynamic capsule, whose key is the supplied bytes.
-    Bytes(Vec<u8>),
-}
-
-#[derive(Debug, PartialEq, Eq, Hash)]
-struct InternalCapsuleKey {
-    // We need to have a copy of the capsule's type to include in the Hash + Eq
-    // so that if two capsules of different types have the same bytes as their key,
-    // they won't be kept under the same entry in the map.
-    capsule_type: TypeId,
-    capsule_key: CapsuleKeyType,
-}
-type Id = Arc<InternalCapsuleKey>;
-trait CreateId {
-    fn id(&self) -> Id;
-}
-impl<C: Capsule> CreateId for C {
-    fn id(&self) -> Id {
-        Arc::new(InternalCapsuleKey {
-            capsule_type: TypeId::of::<C>(),
-            capsule_key: self.key().0,
-        })
     }
 }
 
@@ -707,7 +669,7 @@ mod tests {
 
     #[test]
     fn eq_check_skips_unneeded_rebuilds() {
-        use std::collections::HashMap;
+        use std::{any::TypeId, collections::HashMap};
         static BUILDS: Mutex<OnceCell<HashMap<TypeId, u32>>> = Mutex::new(OnceCell::new());
         fn increment_build_count<C: Capsule>(_capsule: C) {
             let mut cell = BUILDS.lock().unwrap();
@@ -873,8 +835,7 @@ mod tests {
             }
 
             fn key(&self) -> CapsuleKey {
-                let Self(id) = self;
-                id.to_le_bytes().as_ref().to_owned().into()
+                self.0.into()
             }
         }
 
@@ -897,7 +858,7 @@ mod tests {
             }
 
             fn key(&self) -> CapsuleKey {
-                vec![self.0].into()
+                self.0.into()
             }
         }
         struct B(u8);
@@ -913,7 +874,7 @@ mod tests {
             }
 
             fn key(&self) -> CapsuleKey {
-                vec![self.0].into()
+                self.0.into()
             }
         }
 
@@ -942,7 +903,7 @@ mod tests {
             }
 
             fn key(&self) -> CapsuleKey {
-                vec![self.0].into()
+                self.0.into()
             }
         }
         fn sink(CapsuleHandle { mut get, .. }: CapsuleHandle) -> (u8, u8) {
