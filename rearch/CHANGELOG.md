@@ -1,6 +1,38 @@
 
 
+## v0.5.2 (2023-12-14)
+
+### Chore
+
+ - <csr-id-864dee68d91c2f9e1bc5c6f18d9704b586413938/> update version numbers
+
+### New Features
+
+ - <csr-id-47e69e886c37b935c46405bde0ea6140c6ff80d5/> allow any Hash+Eq to be used as a capsule key
+
+### Commit Statistics
+
+<csr-read-only-do-not-edit/>
+
+ - 2 commits contributed to the release.
+ - 2 commits were understood as [conventional](https://www.conventionalcommits.org).
+ - 0 issues like '(#ID)' were seen in commit messages
+
+### Commit Details
+
+<csr-read-only-do-not-edit/>
+
+<details><summary>view details</summary>
+
+ * **Uncategorized**
+    - Update version numbers ([`864dee6`](https://github.com/GregoryConrad/rearch-rs/commit/864dee68d91c2f9e1bc5c6f18d9704b586413938))
+    - Allow any Hash+Eq to be used as a capsule key ([`47e69e8`](https://github.com/GregoryConrad/rearch-rs/commit/47e69e886c37b935c46405bde0ea6140c6ff80d5))
+</details>
+
 ## v0.5.1 (2023-12-13)
+
+<csr-id-66e664a6ae0160beea2874e924f64e3a5aba2154/>
+<csr-id-63a5c5e5042387f91fedf5a26e0d14a412fcc27e/>
 
 ### Chore
 
@@ -18,7 +50,7 @@
 
 <csr-read-only-do-not-edit/>
 
- - 3 commits contributed to the release.
+ - 4 commits contributed to the release.
  - 3 commits were understood as [conventional](https://www.conventionalcommits.org).
  - 0 issues like '(#ID)' were seen in commit messages
 
@@ -29,6 +61,7 @@
 <details><summary>view details</summary>
 
  * **Uncategorized**
+    - Release rearch v0.5.1 ([`f06ef85`](https://github.com/GregoryConrad/rearch-rs/commit/f06ef85e6a83ab3c4261a821071c5c2508e0f937))
     - Update rearch version number ([`66e664a`](https://github.com/GregoryConrad/rearch-rs/commit/66e664a6ae0160beea2874e924f64e3a5aba2154))
     - Add better-api test for nightly ([`63a5c5e`](https://github.com/GregoryConrad/rearch-rs/commit/63a5c5e5042387f91fedf5a26e0d14a412fcc27e))
     - Wrap container values in Arc for faster clones ([`1ea4c0b`](https://github.com/GregoryConrad/rearch-rs/commit/1ea4c0b922533a7a90bdee1baa63d53117414282))
