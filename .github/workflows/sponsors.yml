@@ -1,0 +1,39 @@
+name: Update Sponsors in README
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 0 * * *"
+
+jobs:
+  update-sponsors:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: JamesIves/github-sponsors-readme-action@v1
+        with:
+          token: ${{ secrets.SPONSORS_PAT }}
+          minimum: 100000
+          marker: gold
+          fallback: 'No sponsors in this tier right now; [become the first](https://github.com/sponsors/GregoryConrad)!'
+      - uses: JamesIves/github-sponsors-readme-action@v1
+        with:
+          token: ${{ secrets.SPONSORS_PAT }}
+          minimum: 50000
+          maximum: 99999
+          marker: silver
+          fallback: 'No sponsors in this tier right now; [become the first](https://github.com/sponsors/GregoryConrad)!'
+      - uses: JamesIves/github-sponsors-readme-action@v1
+        with:
+          token: ${{ secrets.SPONSORS_PAT }}
+          minimum: 25000
+          maximum: 49999
+          marker: bronze
+          fallback: 'No sponsors in this tier right now; [become the first](https://github.com/sponsors/GregoryConrad)!'
+      - uses: JamesIves/github-sponsors-readme-action@v1
+        with:
+          token: ${{ secrets.SPONSORS_PAT }}
+          maximum: 24999
+          marker: backers
+          fallback: 'No sponsors in this tier right now; [become the first](https://github.com/sponsors/GregoryConrad)!'

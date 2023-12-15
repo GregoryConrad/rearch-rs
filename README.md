@@ -89,17 +89,23 @@ and this will no longer be feature-gated.
 ## Help Wanted!
 As much as I have done with ReArch, it always seems like there is more to do.
 One person can only do so much!
-
-If you would like to sponsor me to continue my work, thank you!
-Sponsorship information should be up soon.
-
-Or, if you would like to contribute, here are some areas where I would really appreciate help!
+If you would like to contribute, here are some areas where I would really appreciate help!
 - Documentation (especially inline!)
   - If you could add code samples/improve clarity, that would be greatly appreciated.
 - New side effects!
   - I've made many as I've needed them, but it'd be great to have more.
   - If you find yourself using a custom side effect over and over, consider making a PR!
 Chances are other developers can use it too.
+
+
+## Sponsors
+| Tier | Sponsors |
+| :--: | :------: |
+| 🥇 | <!--- gold ---><!--- gold ---> |
+| 🥈 | <!--- silver ---><!--- silver ---> |
+| 🥉 | <!--- bronze ---><!--- bronze ---> |
+| 🫶 | <!--- backers ---><!--- backers ---> |
+
 
 [documentation]: https://rearch.gsconrad.com
 [examples]: https://github.com/GregoryConrad/rearch-rs/tree/main/examples
