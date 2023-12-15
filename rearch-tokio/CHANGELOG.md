@@ -1,6 +1,32 @@
 
 
+## v0.5.1 (2023-12-15)
+
+### Chore
+
+ - <csr-id-109acfec83e4d74050200e98cfd9c6fee13e7e70/> version bumps
+
+### Commit Statistics
+
+<csr-read-only-do-not-edit/>
+
+ - 1 commit contributed to the release.
+ - 1 commit was understood as [conventional](https://www.conventionalcommits.org).
+ - 0 issues like '(#ID)' were seen in commit messages
+
+### Commit Details
+
+<csr-read-only-do-not-edit/>
+
+<details><summary>view details</summary>
+
+ * **Uncategorized**
+    - Version bumps ([`109acfe`](https://github.com/GregoryConrad/rearch-rs/commit/109acfec83e4d74050200e98cfd9c6fee13e7e70))
+</details>
+
 ## v0.5.0 (2023-12-14)
+
+<csr-id-864dee68d91c2f9e1bc5c6f18d9704b586413938/>
 
 ### Chore
 
@@ -10,7 +36,7 @@
 
 <csr-read-only-do-not-edit/>
 
- - 1 commit contributed to the release.
+ - 2 commits contributed to the release.
  - 14 days passed between releases.
  - 1 commit was understood as [conventional](https://www.conventionalcommits.org).
  - 0 issues like '(#ID)' were seen in commit messages
@@ -22,6 +48,7 @@
 <details><summary>view details</summary>
 
  * **Uncategorized**
+    - Release rearch v0.5.2, rearch-tokio v0.5.0 ([`296154d`](https://github.com/GregoryConrad/rearch-rs/commit/296154db215917bdf5815de65e2fb10eb4da1a5f))
     - Update version numbers ([`864dee6`](https://github.com/GregoryConrad/rearch-rs/commit/864dee68d91c2f9e1bc5c6f18d9704b586413938))
 </details>
 

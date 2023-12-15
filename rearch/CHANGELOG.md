@@ -1,6 +1,38 @@
 
 
+## v0.6.0 (2023-12-15)
+
+### Chore
+
+ - <csr-id-109acfec83e4d74050200e98cfd9c6fee13e7e70/> version bumps
+
+### New Features (BREAKING)
+
+ - <csr-id-ec36bcebf0be2d2081c52b58abdf4f415bb96dbb/> remove clone restriction on capsules
+
+### Commit Statistics
+
+<csr-read-only-do-not-edit/>
+
+ - 2 commits contributed to the release.
+ - 2 commits were understood as [conventional](https://www.conventionalcommits.org).
+ - 1 unique issue was worked on: [#15](https://github.com/GregoryConrad/rearch-rs/issues/15)
+
+### Commit Details
+
+<csr-read-only-do-not-edit/>
+
+<details><summary>view details</summary>
+
+ * **[#15](https://github.com/GregoryConrad/rearch-rs/issues/15)**
+    - Remove clone restriction on capsules ([`ec36bce`](https://github.com/GregoryConrad/rearch-rs/commit/ec36bcebf0be2d2081c52b58abdf4f415bb96dbb))
+ * **Uncategorized**
+    - Version bumps ([`109acfe`](https://github.com/GregoryConrad/rearch-rs/commit/109acfec83e4d74050200e98cfd9c6fee13e7e70))
+</details>
+
 ## v0.5.2 (2023-12-14)
+
+<csr-id-864dee68d91c2f9e1bc5c6f18d9704b586413938/>
 
 ### Chore
 
@@ -14,7 +46,7 @@
 
 <csr-read-only-do-not-edit/>
 
- - 2 commits contributed to the release.
+ - 3 commits contributed to the release.
  - 2 commits were understood as [conventional](https://www.conventionalcommits.org).
  - 0 issues like '(#ID)' were seen in commit messages
 
@@ -25,6 +57,7 @@
 <details><summary>view details</summary>
 
  * **Uncategorized**
+    - Release rearch v0.5.2, rearch-tokio v0.5.0 ([`296154d`](https://github.com/GregoryConrad/rearch-rs/commit/296154db215917bdf5815de65e2fb10eb4da1a5f))
     - Update version numbers ([`864dee6`](https://github.com/GregoryConrad/rearch-rs/commit/864dee68d91c2f9e1bc5c6f18d9704b586413938))
     - Allow any Hash+Eq to be used as a capsule key ([`47e69e8`](https://github.com/GregoryConrad/rearch-rs/commit/47e69e886c37b935c46405bde0ea6140c6ff80d5))
 </details>
