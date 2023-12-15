@@ -16,11 +16,18 @@ impl<'a> ContainerReadTxn<'a> {
 
 impl ContainerReadTxn<'_> {
     #[must_use]
-    pub fn try_read<C: Capsule>(&self, capsule: &C) -> Option<C::Data> {
+    pub fn try_read<C: Capsule>(&self, capsule: &C) -> Option<C::Data>
+    where
+        C::Data: Clone,
+    {
+        self.try_read_ref(capsule).map(Clone::clone)
+    }
+
+    #[must_use]
+    pub fn try_read_ref<C: Capsule>(&self, capsule: &C) -> Option<&C::Data> {
         self.data
             .get(&capsule.id())
             .map(crate::downcast_capsule_data::<C>)
-            .map(dyn_clone::clone)
     }
 }
 
@@ -46,31 +53,46 @@ impl<'a> ContainerWriteTxn<'a> {
 }
 
 impl ContainerWriteTxn<'_> {
-    #[allow(clippy::missing_panics_doc)] // false positive
-    pub fn read_or_init<C: Capsule>(&mut self, capsule: C) -> C::Data {
-        let id = capsule.id();
+    pub fn read_or_init<C: Capsule>(&mut self, capsule: C) -> C::Data
+    where
+        C::Data: Clone,
+    {
+        self.read_or_init_ref(capsule).clone()
+    }
 
+    #[allow(clippy::missing_panics_doc)] // false positive
+    pub fn read_or_init_ref<C: Capsule>(&mut self, capsule: C) -> &C::Data {
+        let id = capsule.id();
+        self.ensure_initialized(capsule);
+        self.try_read_ref_raw::<C>(&id)
+            .expect("Ensured capsule was initialized above")
+    }
+
+    #[must_use]
+    pub fn try_read<C: Capsule>(&self, capsule: &C) -> Option<C::Data>
+    where
+        C::Data: Clone,
+    {
+        self.try_read_ref::<C>(capsule).map(Clone::clone)
+    }
+
+    #[must_use]
+    pub fn try_read_ref<C: Capsule>(&self, capsule: &C) -> Option<&C::Data> {
+        self.try_read_ref_raw::<C>(&capsule.id())
+    }
+
+    pub(crate) fn try_read_ref_raw<C: Capsule>(&self, id: &Id) -> Option<&C::Data> {
+        self.data.get(id).map(crate::downcast_capsule_data::<C>)
+    }
+
+    pub(crate) fn ensure_initialized<C: Capsule>(&mut self, capsule: C) {
+        let id = capsule.id();
         if !self.data.contains_key(&id) {
             #[cfg(feature = "logging")]
             log::debug!("Initializing {} ({:?})", std::any::type_name::<C>(), id);
 
             self.build_capsule(capsule);
         }
-
-        self.try_read_raw::<C>(&id)
-            .expect("Data should be present due to checking/building capsule above")
-    }
-
-    #[must_use]
-    pub fn try_read<C: Capsule>(&self, capsule: &C) -> Option<C::Data> {
-        self.try_read_raw::<C>(&capsule.id())
-    }
-
-    fn try_read_raw<C: Capsule>(&self, id: &Id) -> Option<C::Data> {
-        self.data
-            .get(id)
-            .map(crate::downcast_capsule_data::<C>)
-            .map(dyn_clone::clone)
     }
 
     /// Forcefully disposes only the requested node, cleaning up the node's direct dependencies.
