@@ -1,6 +1,5 @@
 #![cfg_attr(feature = "better-api", feature(unboxed_closures, fn_traits))]
 
-use dyn_clone::DynClone;
 use std::{
     any::Any,
     cell::OnceCell,
@@ -29,14 +28,12 @@ pub use txn::*;
 // - `Send` is required because `CapsuleManager` needs to store a copy of the capsule
 // - `'static` is required to store a copy of the capsule, and for TypeId::of()
 pub trait Capsule: Send + 'static {
-    /// The type of data associated with this capsule.
-    /// Capsule types must be `Clone + Send + Sync + 'static` (see [`CapsuleData`]).
-    /// It is recommended to only put types with "cheap" clones in Capsules;
-    /// think Copy types, small Vecs and other containers, basic data structures, and Arcs.
-    /// If you are dealing with a bigger chunk of data, consider wrapping it in an [`Arc`].
-    /// Note: The `im` crate plays *very nicely* with rearch.
+    /// The type of data associated with this capsule, which must be `Send + Sync + 'static`.
+    /// Capsule data that implements `Clone` will also unlock a few convenience methods.
+    /// Note: when your types do implement `Clone`, it is suggested to be a "cheap" Clone.
+    /// `Arc`s, small collections/data structures, and the `im` crate are great for this.
     // Associated type so that Capsule can only be implemented once for each concrete type
-    type Data: CapsuleData;
+    type Data: Send + Sync + 'static;
 
     /// Builds the capsule's immutable data using a given snapshot of the data flow graph.
     /// (The snapshot, a `ContainerWriteTxn`, is abstracted away for you via [`CapsuleHandle`].)
@@ -63,7 +60,7 @@ pub trait Capsule: Send + 'static {
 }
 impl<T, F> Capsule for F
 where
-    T: CapsuleData,
+    T: Send + Sync + 'static,
     F: Fn(CapsuleHandle) -> T + Send + 'static,
 {
     type Data = T;
@@ -79,17 +76,9 @@ where
     }
 }
 
-/// Represents the type of a capsule's data;
-/// Capsules' data must be `Clone + Send + Sync + 'static`.
-/// You seldom need to reference this in your application's code;
-/// you are probably looking for [`CData`] instead.
-pub trait CapsuleData: Any + DynClone + Send + Sync + 'static {}
-impl<T: Clone + Send + Sync + 'static> CapsuleData for T {}
-dyn_clone::clone_trait_object!(CapsuleData);
-
 /// Shorthand for `Clone + Send + Sync + 'static`,
 /// which makes returning `impl Trait` far easier from capsules,
-/// where `Trait` is often a `Fn(Foo) -> Bar`.
+/// where `Trait` is often an `Fn` from side effects.
 pub trait CData: Clone + Send + Sync + 'static {}
 impl<T: Clone + Send + Sync + 'static> CData for T {}
 
@@ -180,7 +169,7 @@ impl Container {
         self.0.with_write_txn(rebuilder, to_run)
     }
 
-    /// Performs a *consistent* read on all supplied capsules.
+    /// Performs a *consistent* read on all supplied capsules that have cloneable data.
     ///
     /// Consistency is important here: if you need the current data from a few different capsules,
     /// *do not* read them individually, but rather group them together with one `read()` call.
@@ -193,7 +182,7 @@ impl Container {
     /// Internally, tries to read all supplied capsules with a read txn first (cheap),
     /// but if that fails (i.e., capsules' data not present in the container),
     /// spins up a write txn and initializes all needed capsules (which blocks).
-    pub fn read<CL: CapsuleList>(&self, capsules: CL) -> CL::Data {
+    pub fn read<Capsules: CapsulesWithCloneRead>(&self, capsules: Capsules) -> Capsules::Data {
         capsules.read(self)
     }
 
@@ -278,9 +267,10 @@ impl Drop for ListenerHandle {
     }
 }
 
-/// A list of capsules.
-/// This is either a singular capsule, like `count`, or a tuple, like `(foo, bar)`.
-pub trait CapsuleList {
+/// A list of capsules with cloneable data.
+/// This is either a singular capsule, like `foo_capsule`,
+/// or a tuple, like `(foo_capsule, bar_capsule)`.
+pub trait CapsulesWithCloneRead {
     type Data;
     fn read(self, container: &Container) -> Self::Data;
 }
@@ -288,7 +278,7 @@ macro_rules! generate_capsule_list_impl {
     ($($C:ident),+) => {
         paste::paste! {
             #[allow(non_snake_case, unused_parens)]
-            impl<$($C: Capsule),*> CapsuleList for ($($C),*) {
+            impl<$($C: Capsule),*> CapsulesWithCloneRead for ($($C),*) where $($C::Data: Clone),* {
                 type Data = ($($C::Data),*);
                 fn read(self, container: &Container) -> Self::Data {
                     let ($([<i $C>]),*) = self;
@@ -445,8 +435,7 @@ impl CapsuleManager {
             .remove(&id)
             .as_ref()
             .map(downcast_capsule_data::<C>)
-            .map(dyn_clone::clone)
-            .map_or(true, |old_data| !C::eq(&old_data, &new_data));
+            .map_or(true, |old_data| !C::eq(old_data, &new_data));
 
         txn.data.insert(id, Arc::new(new_data));
 

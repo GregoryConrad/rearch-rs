@@ -21,19 +21,33 @@ impl<'scope, 'total> CapsuleReader<'scope, 'total> {
         Self(InternalCapsuleReader::Normal { id, txn })
     }
 
-    /// Reads the current data of the supplied capsule, initializing it if needed.
+    /// Returns a clone of the current data of the supplied capsule, initializing it if needed.
     /// Internally forms a dependency graph amongst capsules, so feel free to conditionally invoke
     /// this function in case you only conditionally need a capsule's data.
     ///
     /// # Panics
     /// Panics when a capsule attempts to read itself in its first build,
     /// or when a mocked [`CapsuleReader`] attempts to read a capsule's data that wasn't mocked.
-    pub fn get<C: Capsule>(&mut self, capsule: C) -> C::Data {
+    pub fn get<C: Capsule>(&mut self, capsule: C) -> C::Data
+    where
+        C::Data: Clone,
+    {
+        self.as_ref(capsule).clone()
+    }
+
+    /// Returns a ref to the current data of the supplied capsule, initializing it if needed.
+    /// Internally forms a dependency graph amongst capsules, so feel free to conditionally invoke
+    /// this function in case you only conditionally need a capsule's data.
+    ///
+    /// # Panics
+    /// Panics when a capsule attempts to read itself in its first build,
+    /// or when a mocked [`CapsuleReader`] attempts to read a capsule's data that wasn't mocked.
+    pub fn as_ref<C: Capsule>(&mut self, capsule: C) -> &C::Data {
         match &mut self.0 {
             InternalCapsuleReader::Normal { ref id, txn } => {
                 let (this, other) = (id, capsule.id());
                 if this == &other {
-                    return txn.try_read(&capsule).unwrap_or_else(|| {
+                    return txn.try_read_ref(&capsule).unwrap_or_else(|| {
                         let name = std::any::type_name::<C>();
                         panic!(
                             "{name} ({id:?}) tried to read itself on its first build! {} {} {}",
@@ -44,25 +58,23 @@ impl<'scope, 'total> CapsuleReader<'scope, 'total> {
                     });
                 }
 
-                // Adding dep relationship is after read_or_init to ensure manager is initialized
-                let data = txn.read_or_init(capsule);
-                txn.add_dependency_relationship(other, this);
-                data
+                txn.ensure_initialized(capsule);
+                txn.add_dependency_relationship(Arc::clone(&other), this);
+                txn.try_read_ref_raw::<C>(&other)
+                    .expect("Ensured capsule was initialized above")
             }
             InternalCapsuleReader::Mock { mocks } => {
                 let id = capsule.id();
-                #[allow(clippy::map_unwrap_or)] // suggestion is ugly/hard to read
-                mocks
-                    .get(&id)
-                    .map(crate::downcast_capsule_data::<C>)
-                    .map(dyn_clone::clone)
-                    .unwrap_or_else(|| {
+                mocks.get(&id).map_or_else(
+                    || {
                         panic!(
                             "Mock CapsuleReader was used to read {} ({id:?}) {}",
                             std::any::type_name::<C>(),
                             "when it was not included in the mock!"
                         );
-                    })
+                    },
+                    crate::downcast_capsule_data::<C>,
+                )
             }
         }
     }
