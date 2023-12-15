@@ -81,7 +81,10 @@ impl<'scope, 'total> CapsuleReader<'scope, 'total> {
 }
 
 #[cfg(feature = "better-api")]
-impl<A: Capsule> FnOnce<(A,)> for CapsuleReader<'_, '_> {
+impl<A: Capsule> FnOnce<(A,)> for CapsuleReader<'_, '_>
+where
+    A::Data: Clone,
+{
     type Output = A::Data;
     extern "rust-call" fn call_once(mut self, args: (A,)) -> Self::Output {
         self.call_mut(args)
@@ -89,7 +92,10 @@ impl<A: Capsule> FnOnce<(A,)> for CapsuleReader<'_, '_> {
 }
 
 #[cfg(feature = "better-api")]
-impl<A: Capsule> FnMut<(A,)> for CapsuleReader<'_, '_> {
+impl<A: Capsule> FnMut<(A,)> for CapsuleReader<'_, '_>
+where
+    A::Data: Clone,
+{
     extern "rust-call" fn call_mut(&mut self, args: (A,)) -> Self::Output {
         self.get(args.0)
     }
