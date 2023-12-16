@@ -109,14 +109,20 @@ Chances are other developers can use it too.
     <td>
       <!--- gold ---><!--- gold ---> 
     </td>
+  </tr>
+  <tr>
     <td>🥈</td>
     <td>
       <!--- silver ---><!--- silver ---> 
     </td>
+  </tr>
+  <tr>
     <td>🥉</td>
     <td>
       <!--- bronze ---><!--- bronze ---> 
     </td>
+  </tr>
+  <tr>
     <td>🫶</td>
     <td>
        <!--- backers ---><!--- backers ---> 
