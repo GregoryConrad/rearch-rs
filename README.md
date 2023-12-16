@@ -100,34 +100,38 @@ Chances are other developers can use it too.
 
 ## Sponsors
 <table>
-  <tr>
-    <td>Tier</td>
-    <td>Sponsors</td>
-  </tr>
-  <tr>
-    <td>🥇</td>
-    <td>
-      <!--- gold ---><!--- gold ---> 
-    </td>
-  </tr>
-  <tr>
-    <td>🥈</td>
-    <td>
-      <!--- silver ---><!--- silver ---> 
-    </td>
-  </tr>
-  <tr>
-    <td>🥉</td>
-    <td>
-      <!--- bronze ---><!--- bronze ---> 
-    </td>
-  </tr>
-  <tr>
-    <td>🫶</td>
-    <td>
-       <!--- backers ---><!--- backers ---> 
-    </td>
-  </tr>
+  <thead>
+    <tr>
+      <th>Tier</td>
+      <th>Sponsors</td>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>🥇</td>
+      <td>
+        <!--- gold ---><!--- gold ---> 
+      </td>
+    </tr>
+    <tr>
+      <td>🥈</td>
+      <td>
+        <!--- silver ---><!--- silver ---> 
+      </td>
+    </tr>
+    <tr>
+      <td>🥉</td>
+      <td>
+        <!--- bronze ---><!--- bronze ---> 
+      </td>
+    </tr>
+    <tr>
+      <td>🫶</td>
+      <td>
+         <!--- backers ---><!--- backers ---> 
+      </td>
+    </tr>
+  </tbody>
 </table>
 
 
