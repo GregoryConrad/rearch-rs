@@ -17,6 +17,7 @@ jobs:
           minimum: 100000
           marker: gold
           fallback: 'No sponsors in this tier right now; [become the first](https://github.com/sponsors/GregoryConrad)!'
+          template: '<a href="https://github.com/{{{ login }}}"><img src="https://github.com/{{{ login }}}.png" width="120px" alt="{{{ name }}}" /></a>'
       - uses: JamesIves/github-sponsors-readme-action@v1
         with:
           token: ${{ secrets.SPONSORS_PAT }}
@@ -24,6 +25,7 @@ jobs:
           maximum: 99999
           marker: silver
           fallback: 'No sponsors in this tier right now; [become the first](https://github.com/sponsors/GregoryConrad)!'
+          template: '<a href="https://github.com/{{{ login }}}"><img src="https://github.com/{{{ login }}}.png" width="80px" alt="{{{ name }}}" /></a>'
       - uses: JamesIves/github-sponsors-readme-action@v1
         with:
           token: ${{ secrets.SPONSORS_PAT }}
@@ -31,9 +33,11 @@ jobs:
           maximum: 49999
           marker: bronze
           fallback: 'No sponsors in this tier right now; [become the first](https://github.com/sponsors/GregoryConrad)!'
+          template: '<a href="https://github.com/{{{ login }}}"><img src="https://github.com/{{{ login }}}.png" width="60px" alt="{{{ name }}}" /></a>'
       - uses: JamesIves/github-sponsors-readme-action@v1
         with:
           token: ${{ secrets.SPONSORS_PAT }}
           maximum: 24999
           marker: backers
           fallback: 'No sponsors in this tier right now; [become the first](https://github.com/sponsors/GregoryConrad)!'
+          template: '<a href="https://github.com/{{{ login }}}"><img src="https://github.com/{{{ login }}}.png" width="40px" alt="{{{ name }}}" /></a>'

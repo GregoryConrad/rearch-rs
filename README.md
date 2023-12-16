@@ -99,12 +99,30 @@ Chances are other developers can use it too.
 
 
 ## Sponsors
-| Tier | Sponsors |
-| :--: | :------: |
-| 🥇 | <!--- gold ---><!--- gold ---> |
-| 🥈 | <!--- silver ---><!--- silver ---> |
-| 🥉 | <!--- bronze ---><!--- bronze ---> |
-| 🫶 | <!--- backers ---><!--- backers ---> |
+<table>
+  <tr>
+    <td>Tier</td>
+    <td>Sponsors</td>
+  </tr>
+  <tr>
+    <td>🥇</td>
+    <td>
+      <!--- gold ---><!--- gold ---> 
+    </td>
+    <td>🥈</td>
+    <td>
+      <!--- silver ---><!--- silver ---> 
+    </td>
+    <td>🥉</td>
+    <td>
+      <!--- bronze ---><!--- bronze ---> 
+    </td>
+    <td>🫶</td>
+    <td>
+       <!--- backers ---><!--- backers ---> 
+    </td>
+  </tr>
+</table>
 
 
 [documentation]: https://rearch.gsconrad.com
