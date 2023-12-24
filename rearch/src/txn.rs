@@ -1,7 +1,9 @@
 use concread::hashmap::{HashMapReadTxn, HashMapWriteTxn};
 use std::{any::Any, cell::OnceCell, collections::HashSet, sync::Arc};
 
-use crate::{Capsule, CapsuleManager, CapsuleRebuilder, CreateId, Id, EXCLUSIVE_OWNER_MSG};
+use crate::{
+    Capsule, CapsuleManager, CreateId, Id, SideEffectTxnOrchestrator, EXCLUSIVE_OWNER_MSG,
+};
 
 #[allow(clippy::module_name_repetitions)] // re-exported at crate level (not in module)
 pub struct ContainerReadTxn<'a> {
@@ -33,7 +35,7 @@ impl ContainerReadTxn<'_> {
 
 #[allow(clippy::module_name_repetitions)] // re-exported at crate level (not in module)
 pub struct ContainerWriteTxn<'a> {
-    pub(crate) rebuilder: CapsuleRebuilder,
+    pub(crate) side_effect_txn_orchestrator: SideEffectTxnOrchestrator,
     pub(crate) data: HashMapWriteTxn<'a, Id, Arc<dyn Any + Send + Sync>>,
     nodes: &'a mut std::collections::HashMap<Id, CapsuleManager>,
 }
@@ -42,16 +44,21 @@ impl<'a> ContainerWriteTxn<'a> {
     pub(crate) fn new(
         data: HashMapWriteTxn<'a, Id, Arc<dyn Any + Send + Sync>>,
         nodes: &'a mut std::collections::HashMap<Id, CapsuleManager>,
-        rebuilder: CapsuleRebuilder,
+        side_effect_txn_orchestrator: SideEffectTxnOrchestrator,
     ) -> Self {
         Self {
-            rebuilder,
+            side_effect_txn_orchestrator,
             data,
             nodes,
         }
     }
 }
 
+// NOTE: there must be absolutely no modifications to side effect states
+// outside of a side effect transaction.
+// While reading capsules and building *new* capsules is safe while a side effect txn is ongoing
+// (because capsule data is immutable and kept separate from side effects and nodes),
+// modifying any existing capsules will break consistency.
 impl ContainerWriteTxn<'_> {
     pub fn read_or_init<C: Capsule>(&mut self, capsule: C) -> C::Data
     where
@@ -87,11 +94,12 @@ impl ContainerWriteTxn<'_> {
 
     pub(crate) fn ensure_initialized<C: Capsule>(&mut self, capsule: C) {
         let id = capsule.id();
-        if !self.data.contains_key(&id) {
+        if let std::collections::hash_map::Entry::Vacant(e) = self.nodes.entry(Arc::clone(&id)) {
             #[cfg(feature = "logging")]
             log::debug!("Initializing {} ({:?})", std::any::type_name::<C>(), id);
 
-            self.build_capsule(capsule);
+            e.insert(CapsuleManager::new(capsule));
+            self.build_single_node(&id);
         }
     }
 
@@ -109,53 +117,13 @@ impl ContainerWriteTxn<'_> {
             });
     }
 
-    pub(crate) fn add_dependency_relationship(&mut self, dependency: Id, dependent: &Id) {
-        self.node_or_panic(&dependency)
+    pub(crate) fn add_dependency_relationship(&mut self, dependency: &Id, dependent: &Id) {
+        self.node_or_panic(dependency)
             .dependents
             .insert(Arc::clone(dependent));
         self.node_or_panic(dependent)
             .dependencies
-            .insert(dependency);
-    }
-
-    /// Forcefully builds the capsule with the supplied id. Panics if node is not in the graph
-    pub(crate) fn build_capsule_or_panic(&mut self, id: Id) {
-        let self_changed = self.build_single_node(&id);
-        if !self_changed {
-            return;
-        }
-
-        let mut build_order_stack = self.create_build_order_stack(Arc::clone(&id));
-        build_order_stack.pop(); // we built id already above, and id is the head of the stack
-        let disposable_nodes = self.get_disposable_nodes_from_build_order_stack(&build_order_stack);
-
-        let mut changed_nodes = HashSet::new();
-        changed_nodes.insert(id);
-
-        for curr_id in build_order_stack.into_iter().rev() {
-            let node = self.node_or_panic(&curr_id);
-
-            let have_deps_changed = node
-                .dependencies
-                .iter()
-                .any(|dep| changed_nodes.contains(dep));
-            if !have_deps_changed {
-                continue;
-            }
-
-            if disposable_nodes.contains(&curr_id) {
-                // Note: dependency/dependent relationships will be ok after this,
-                // since we are disposing all dependents in the build order,
-                // because we are adding this node to changedNodes
-                self.dispose_single_node(&curr_id);
-                changed_nodes.insert(curr_id);
-            } else {
-                let did_node_change = self.build_single_node(&curr_id);
-                if did_node_change {
-                    changed_nodes.insert(curr_id);
-                }
-            }
-        }
+            .insert(Arc::clone(dependency));
     }
 
     pub(crate) fn take_capsule_and_side_effect(
@@ -190,15 +158,36 @@ impl ContainerWriteTxn<'_> {
             .expect(EXCLUSIVE_OWNER_MSG)
     }
 
-    /// Triggers a first build or rebuild for the supplied capsule
-    fn build_capsule<C: Capsule>(&mut self, capsule: C) {
-        let id = capsule.id();
+    /// Forcefully builds the capsule with the supplied id. Panics if node is not in the graph
+    pub(crate) fn build_capsules_or_panic(&mut self, ids: &HashSet<Id>) {
+        let build_order_stack = self.create_build_order_stack(ids);
+        let disposable_nodes = self.get_disposable_nodes_from_build_order_stack(&build_order_stack);
+        let mut changed_nodes = HashSet::new();
+        for curr_id in build_order_stack.into_iter().rev() {
+            let node = self.node_or_panic(&curr_id);
 
-        if let std::collections::hash_map::Entry::Vacant(e) = self.nodes.entry(Arc::clone(&id)) {
-            e.insert(CapsuleManager::new(capsule));
+            let build_is_required = ids.contains(&curr_id);
+            let have_deps_changed = node
+                .dependencies
+                .iter()
+                .any(|dep| changed_nodes.contains(dep));
+            if !build_is_required && !have_deps_changed {
+                continue;
+            }
+
+            if disposable_nodes.contains(&curr_id) {
+                // Note: dependency/dependent relationships will be ok after this,
+                // since we are disposing all dependents in the build order,
+                // because we are adding this node to changedNodes
+                self.dispose_single_node(&curr_id);
+                changed_nodes.insert(curr_id);
+            } else {
+                let did_node_change = self.build_single_node(&curr_id);
+                if did_node_change {
+                    changed_nodes.insert(curr_id);
+                }
+            }
         }
-
-        self.build_capsule_or_panic(id);
     }
 
     /// Gets the requested node if it is in the graph
@@ -247,11 +236,15 @@ impl ContainerWriteTxn<'_> {
 
     /// Creates the start node's dependent subgraph build order, including start, *as a stack*.
     /// Thus, proper iteration order is done by popping off of the stack (in reverse order)!
-    fn create_build_order_stack(&mut self, start: Id) -> Vec<Id> {
+    fn create_build_order_stack(&mut self, start: &HashSet<Id>) -> Vec<Id> {
         // We need some more information alongside each node in order to do the topological sort
         // - False is for the first visit, which adds all deps to be visited and then self again
         // - True is for the second visit, which pushes node to the build order
-        let mut to_visit_stack = vec![(false, start)];
+        let mut to_visit_stack = start
+            .iter()
+            .map(Arc::clone)
+            .map(|id| (false, id))
+            .collect::<Vec<_>>();
         let mut visited = HashSet::new();
         let mut build_order_stack = Vec::new();
 
@@ -267,7 +260,7 @@ impl ContainerWriteTxn<'_> {
                     .dependents
                     .iter()
                     .filter(|dep| !visited.contains(*dep))
-                    .cloned()
+                    .map(Arc::clone)
                     .for_each(|dep| to_visit_stack.push((false, dep)));
             }
         }

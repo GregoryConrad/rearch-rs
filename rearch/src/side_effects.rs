@@ -1,10 +1,17 @@
 use std::{cell::OnceCell, sync::Arc};
 
-use crate::{CData, SideEffect, SideEffectRegistrar};
+use crate::{CData, SideEffect, SideEffectRegistrar, SideEffectTxnRunner};
 
 pub fn raw<'a, T: Send + 'static>(
     initial: T,
-) -> impl SideEffect<'a, Api = (&'a mut T, impl CData + Fn(Box<dyn FnOnce(&mut T)>))> {
+) -> impl SideEffect<
+    'a,
+    Api = (
+        &'a mut T,
+        impl CData + Fn(Box<dyn FnOnce(&mut T)>),
+        SideEffectTxnRunner,
+    ),
+> {
     move |register: SideEffectRegistrar<'a>| register.raw(initial)
 }
 
@@ -15,7 +22,7 @@ pub fn state<'a, T: Send + 'static>(
     initial: T,
 ) -> impl SideEffect<'a, Api = (&'a mut T, impl CData + Fn(T))> {
     move |register: SideEffectRegistrar<'a>| {
-        let (state, rebuild) = register.raw(initial);
+        let (state, rebuild, _) = register.raw(initial);
         let set_state = move |new_state| {
             rebuild(Box::new(|state| *state = new_state));
         };
@@ -32,7 +39,7 @@ where
     F: FnOnce() -> T + Send + 'static,
 {
     move |register: SideEffectRegistrar<'a>| {
-        let ((cell, f), rebuild) = register.raw((OnceCell::new(), Some(init)));
+        let ((cell, f), rebuild, _) = register.raw((OnceCell::new(), Some(init)));
         cell.get_or_init(|| std::mem::take(f).expect("Init fn should be present for cell init")());
         let state = cell.get_mut().expect("State initialized above");
         let set_state = move |new_state| {
@@ -47,7 +54,7 @@ where
 
 pub fn value<'a, T: Send + 'static>(value: T) -> impl SideEffect<'a, Api = &'a mut T> {
     move |register: SideEffectRegistrar<'a>| {
-        let (state, _) = register.raw(value);
+        let (state, _, _) = register.raw(value);
         state
     }
 }
@@ -61,7 +68,7 @@ where
     F: FnOnce() -> T + Send + 'static,
 {
     move |register: SideEffectRegistrar<'a>| {
-        let ((cell, f), _) = register.raw((OnceCell::new(), Some(init)));
+        let ((cell, f), _, _) = register.raw((OnceCell::new(), Some(init)));
         cell.get_or_init(|| std::mem::take(f).expect("Init fn should be present for cell init")());
         cell.get_mut().expect("State initialized above")
     }
@@ -84,7 +91,7 @@ pub fn is_first_build<'a>() -> impl SideEffect<'a, Api = bool> {
 #[must_use]
 pub fn rebuilder<'a>() -> impl SideEffect<'a, Api = impl CData + Fn()> {
     move |register: SideEffectRegistrar<'a>| {
-        let ((), rebuild) = register.raw(());
+        let ((), rebuild, _) = register.raw(());
         move || rebuild(Box::new(|()| {}))
     }
 }
