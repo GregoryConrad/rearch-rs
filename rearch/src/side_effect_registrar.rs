@@ -41,7 +41,8 @@ impl<'a> SideEffectRegistrar<'a> {
 
 impl<'a> SideEffectRegistrar<'a> {
     /// The basic building block for all side effects.
-    pub(crate) fn raw<T>(
+    #[allow(clippy::missing_panics_doc)] // false positive
+    pub fn raw<T>(
         self,
         initial: T,
     ) -> (

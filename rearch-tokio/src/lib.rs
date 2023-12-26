@@ -1,6 +1,7 @@
 use std::{cell::RefCell, future::Future, rc::Rc, sync::Arc};
 
-use rearch::{side_effects, SideEffect, SideEffectRegistrar};
+use rearch::{SideEffect, SideEffectRegistrar};
+use rearch_effects as effects;
 
 struct FunctionalDrop<F: FnOnce()>(Option<F>);
 impl<F: FnOnce()> Drop for FunctionalDrop<F> {
@@ -51,8 +52,8 @@ where
 {
     move |register: SideEffectRegistrar<'a>| {
         let ((state, set_state), mut on_change) = register.register((
-            side_effects::state(AsyncState::Idle(None)),
-            side_effects::run_on_change(),
+            effects::state(AsyncState::Idle(None)),
+            effects::run_on_change(),
         ));
         let state = Rc::new(RefCell::new(state));
         let get = {
@@ -90,9 +91,9 @@ where
 {
     move |register: SideEffectRegistrar<'a>| {
         let ((state, rebuild, _), (_, on_change)) = register.register((
-            side_effects::raw(AsyncState::Idle(None)),
+            effects::raw(AsyncState::Idle(None)),
             // This immitates run_on_change, but for external use (outside of build)
-            side_effects::state(FunctionalDrop(None)),
+            effects::state(FunctionalDrop(None)),
         ));
 
         let state = state.clone();
@@ -138,7 +139,7 @@ where
 {
     move |register: SideEffectRegistrar<'a>| {
         let ((get_read, mut set_read), (write_state, set_write, _), is_first_build) =
-            register.register((future(), mutation(), side_effects::is_first_build()));
+            register.register((future(), mutation(), effects::is_first_build()));
 
         if is_first_build {
             set_read(read());

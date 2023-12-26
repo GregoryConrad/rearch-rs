@@ -17,6 +17,8 @@ readme = "README.md"
 [workspace.dependencies]
 rearch-macros = { path = "rearch-macros", version = "0.4.0" }
 rearch = { path = "rearch", version = "0.6.0" }
+rearch-effects = { path = "rearch-effects", version = "0.1.0" }
+rearch-tokio = { path = "rearch-tokio", version = "0.5.1" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

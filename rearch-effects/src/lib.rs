@@ -1,6 +1,5 @@
+use rearch::{CData, SideEffect, SideEffectRegistrar};
 use std::{cell::OnceCell, sync::Arc};
-
-use crate::{CData, SideEffect, SideEffectRegistrar, SideEffectTxnRunner};
 
 pub fn raw<'a, T: Send + 'static>(
     initial: T,
@@ -9,7 +8,7 @@ pub fn raw<'a, T: Send + 'static>(
     Api = (
         &'a mut T,
         impl CData + Fn(Box<dyn FnOnce(&mut T)>),
-        SideEffectTxnRunner,
+        Arc<dyn Send + Sync + Fn(Box<dyn FnOnce()>)>,
     ),
 > {
     move |register: SideEffectRegistrar<'a>| register.raw(initial)
@@ -168,6 +167,7 @@ where
     }
 }
 
+/*
 /// A thin wrapper around the state side effect that enables easy state persistence.
 ///
 /// You provide a `read` function and a `write` function,
@@ -197,3 +197,4 @@ where
         (&*state, persist)
     }
 }
+*/
