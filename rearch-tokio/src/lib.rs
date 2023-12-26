@@ -89,7 +89,7 @@ where
     F: Future<Output = T> + Send + 'static,
 {
     move |register: SideEffectRegistrar<'a>| {
-        let ((state, rebuild), (_, on_change)) = register.register((
+        let ((state, rebuild, _), (_, on_change)) = register.register((
             side_effects::raw(AsyncState::Idle(None)),
             // This immitates run_on_change, but for external use (outside of build)
             side_effects::state(FunctionalDrop(None)),

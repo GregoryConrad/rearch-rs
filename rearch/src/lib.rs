@@ -1,8 +1,9 @@
 #![cfg_attr(feature = "better-api", feature(unboxed_closures, fn_traits))]
 
+use parking_lot::ReentrantMutex;
 use std::{
     any::Any,
-    cell::OnceCell,
+    cell::{OnceCell, RefCell},
     collections::HashSet,
     ops::Deref,
     sync::{Arc, Mutex, Weak},
@@ -40,7 +41,7 @@ pub trait Capsule: Send + 'static {
     ///
     /// # Concurrency
     /// ABSOLUTELY DO NOT TRIGGER ANY REBUILDS WITHIN THIS FUNCTION!
-    /// Doing so will result in a deadlock.
+    /// Doing so may result in a deadlock or a panic.
     fn build(&self, handle: CapsuleHandle) -> Self::Data;
 
     /// Returns whether or not a capsule's old data and new data are equivalent
@@ -165,8 +166,8 @@ impl Container {
     /// This will result in a deadlock, and no future write transactions will be permitted.
     /// You can always trigger a rebuild in a new thread or after the `ContainerWriteTxn` drops.
     pub fn with_write_txn<R>(&self, to_run: impl FnOnce(&mut ContainerWriteTxn) -> R) -> R {
-        let rebuilder = CapsuleRebuilder(Arc::downgrade(&self.0));
-        self.0.with_write_txn(rebuilder, to_run)
+        let orchestrator = SideEffectTxnOrchestrator(Arc::downgrade(&self.0));
+        self.0.with_write_txn(orchestrator, to_run)
     }
 
     /// Performs a *consistent* read on all supplied capsules that have cloneable data.
@@ -261,8 +262,8 @@ impl Drop for ListenerHandle {
     fn drop(&mut self) {
         if let Some(store) = self.store.upgrade() {
             // Note: The node is guaranteed to be in the graph here since it is a listener.
-            let rebuilder = CapsuleRebuilder(Weak::clone(&self.store));
-            store.with_write_txn(rebuilder, |txn| txn.dispose_node(&self.id));
+            let orchestrator = SideEffectTxnOrchestrator(Weak::clone(&self.store));
+            store.with_write_txn(orchestrator, |txn| txn.dispose_node(&self.id));
         }
     }
 }
@@ -308,6 +309,7 @@ generate_capsule_list_impl!(A, B, C, D, E, F, G, H);
 struct ContainerStore {
     data: concread::hashmap::HashMap<Id, Arc<dyn Any + Send + Sync>>,
     nodes: Mutex<std::collections::HashMap<Id, CapsuleManager>>,
+    curr_side_effect_txn_modified_ids: ReentrantMutex<RefCell<Option<HashSet<Id>>>>,
 }
 impl ContainerStore {
     fn with_read_txn<R>(&self, to_run: impl FnOnce(&ContainerReadTxn) -> R) -> R {
@@ -318,12 +320,12 @@ impl ContainerStore {
     #[allow(clippy::significant_drop_tightening)] // false positive
     fn with_write_txn<R>(
         &self,
-        rebuilder: CapsuleRebuilder,
+        orchestrator: SideEffectTxnOrchestrator,
         to_run: impl FnOnce(&mut ContainerWriteTxn) -> R,
     ) -> R {
         let data = self.data.write();
         let nodes = &mut self.nodes.lock().expect("Mutex shouldn't fail to lock");
-        let mut txn = ContainerWriteTxn::new(data, nodes, rebuilder);
+        let mut txn = ContainerWriteTxn::new(data, nodes, orchestrator);
 
         let return_val = to_run(&mut txn);
 
@@ -334,31 +336,89 @@ impl ContainerStore {
     }
 }
 
-#[derive(Clone)]
-struct CapsuleRebuilder(Weak<ContainerStore>);
-impl CapsuleRebuilder {
-    fn rebuild(&self, id: Id, mutation: impl FnOnce(&mut OnceCell<Box<dyn Any + Send>>)) {
-        #[allow(clippy::option_if_let_else)] // results in less readable code
-        if let Some(store) = self.0.upgrade() {
-            #[cfg(feature = "logging")]
-            log::debug!("Rebuilding Capsule ({:?})", id);
+type SideEffectStateMutation = Box<dyn FnOnce(&mut dyn Any)>;
+type SideEffectStateMutater = Arc<dyn Send + Sync + Fn(SideEffectStateMutation)>;
+type SideEffectTxnRunner = Arc<dyn Send + Sync + Fn(Box<dyn FnOnce()>)>;
 
-            // Note: The node is guaranteed to be in the graph here since this is a rebuild.
-            // (And to trigger a rebuild, a capsule must have used its side effect handle,
-            // and using the side effect handle prevents the idempotent gc.)
-            store.with_write_txn(self.clone(), |txn| {
-                // We have the txn now, so that means we also hold the data & nodes lock.
-                // Thus, this is where we should run the supplied mutation.
-                mutation(txn.side_effect(&id));
-                txn.build_capsule_or_panic(id);
-            });
-        } else {
+#[derive(Clone)]
+struct SideEffectTxnOrchestrator(Weak<ContainerStore>);
+impl SideEffectTxnOrchestrator {
+    fn run_mutation(&self, id: Id, mutation: SideEffectStateMutation) {
+        let Some(store) = self.0.upgrade() else {
             #[cfg(feature = "logging")]
             log::warn!(
-                "Rebuild triggered after Container disposal on Capsule ({:?})",
+                "Attempted to mutate side effect state after Container disposal on Capsule ({:?})",
                 id
             );
+
+            return;
+        };
+
+        #[cfg(feature = "logging")]
+        log::debug!("Mutating side effect state in Capsule ({:?})", id);
+
+        let orchestrator = self.clone();
+        self.run_txn(Box::new(move || {
+            // Note: The node is guaranteed to be in the graph here since it registers a side effect.
+            store.with_write_txn(orchestrator, {
+                let id = &id;
+                move |txn| {
+                    let effect = txn
+                        .side_effect(id)
+                        .get_mut()
+                        .expect(concat!(
+                            "The side effect must've been previously initialized ",
+                            "in order to use the side effect state mutater"
+                        ))
+                        .as_mut();
+                    mutation(effect);
+                }
+            });
+            store
+                .curr_side_effect_txn_modified_ids
+                .lock()
+                .borrow_mut()
+                .as_mut()
+                .expect("Called in a side effect txn, so txn should be Some")
+                .insert(id);
+        }));
+    }
+
+    fn run_txn(&self, txn: Box<dyn FnOnce()>) {
+        let Some(store) = self.0.upgrade() else {
+            #[cfg(feature = "logging")]
+            log::warn!("Attempted to run a side effect txn after Container disposal");
+
+            return;
+        };
+        let curr_txn_modified_ids = store.curr_side_effect_txn_modified_ids.lock();
+
+        let is_root_txn = curr_txn_modified_ids.borrow().is_none();
+        if is_root_txn {
+            *curr_txn_modified_ids.borrow_mut() = Some(HashSet::new());
         }
+
+        txn();
+
+        if is_root_txn {
+            let to_build = std::mem::take(&mut *curr_txn_modified_ids.borrow_mut())
+                .expect("Ensured initialization above");
+            store.with_write_txn(self.clone(), move |txn| {
+                txn.build_capsules_or_panic(&to_build);
+            });
+        }
+
+        drop(curr_txn_modified_ids); // ensure the lock is held until after the last store write txn
+    }
+
+    fn create_state_mutater_for_id(&self, id: Id) -> SideEffectStateMutater {
+        let orchestrator = self.clone();
+        Arc::new(move |mutation| orchestrator.run_mutation(Arc::clone(&id), mutation))
+    }
+
+    fn create_txn_runner(&self) -> SideEffectTxnRunner {
+        let orchestrator = self.clone();
+        Arc::new(move |txn| orchestrator.run_txn(txn))
     }
 }
 
@@ -401,30 +461,23 @@ impl CapsuleManager {
         log::trace!("Building {} ({:?})", std::any::type_name::<C>(), id);
 
         let new_data = {
+            let side_effect_state_mutater = txn
+                .side_effect_txn_orchestrator
+                .create_state_mutater_for_id(Arc::clone(&id));
+            let side_effect_txn_runner = txn.side_effect_txn_orchestrator.create_txn_runner();
+
             let (capsule, mut side_effect) = txn.take_capsule_and_side_effect(&id);
-
-            let rebuilder = {
-                let rebuilder = txn.rebuilder.clone();
-                let id = Arc::clone(&id);
-                Box::new(move |mutation: Box<dyn FnOnce(&mut Box<_>)>| {
-                    rebuilder.rebuild(Arc::clone(&id), |effect| {
-                        let effect = effect.get_mut().expect(concat!(
-                            "The side effect must've been previously initialized ",
-                            "in order to use the rebuilder"
-                        ));
-                        mutation(effect);
-                    });
-                })
-            };
-
             let new_data = capsule
                 .downcast_ref::<C>()
                 .expect("Types should be properly enforced due to generics")
                 .build(CapsuleHandle {
                     get: CapsuleReader::new(Arc::clone(&id), txn),
-                    register: SideEffectRegistrar::new(&mut side_effect, rebuilder),
+                    register: SideEffectRegistrar::new(
+                        &mut side_effect,
+                        side_effect_state_mutater,
+                        side_effect_txn_runner,
+                    ),
                 });
-
             txn.yield_capsule_and_side_effect(&id, capsule, side_effect);
 
             new_data
@@ -1000,5 +1053,154 @@ mod tests {
         });
 
         assert_eq!(read_txn_counter, 3);
+    }
+
+    mod side_effect_txns {
+        use crate::*;
+
+        fn two_side_effects_capsule(
+            CapsuleHandle { register, .. }: CapsuleHandle,
+        ) -> ((u8, impl CData + Fn(u8)), (u8, impl CData + Fn(u8))) {
+            let ((s1, ss1), (s2, ss2)) =
+                register.register((side_effects::state(0), side_effects::state(1)));
+            ((*s1, ss1), (*s2, ss2))
+        }
+
+        fn another_capsule(
+            CapsuleHandle { register, .. }: CapsuleHandle,
+        ) -> (u8, impl CData + Fn(u8)) {
+            let (state, set_state) = register.register(side_effects::state(2));
+            (*state, set_state)
+        }
+
+        fn batch_all_updates_action(
+            CapsuleHandle { mut get, register }: CapsuleHandle,
+        ) -> impl CData + Fn(u8) {
+            let ((_, set_state1), (_, set_state2)) = get.get(two_side_effects_capsule);
+            let (_, set_state3) = get.get(another_capsule);
+            let (_, _, run_txn) = register.register(side_effects::raw(()));
+            move |n| {
+                let set_state1 = set_state1.clone();
+                let set_state2 = set_state2.clone();
+                let set_state3 = set_state3.clone();
+                run_txn(Box::new(move || {
+                    set_state1(n);
+                    set_state2(n);
+                    set_state3(n);
+                }));
+            }
+        }
+
+        fn build_counter_capsule(CapsuleHandle { mut get, register }: CapsuleHandle) -> u8 {
+            let is_first_build = register.register(side_effects::is_first_build());
+
+            _ = get.get(two_side_effects_capsule);
+            _ = get.get(another_capsule);
+
+            if is_first_build {
+                1
+            } else {
+                get.get(build_counter_capsule) + 1
+            }
+        }
+
+        fn txn_runner_capsule(
+            CapsuleHandle { register, .. }: CapsuleHandle,
+        ) -> SideEffectTxnRunner {
+            register.raw(()).2
+        }
+
+        #[test]
+        fn one_capsule_with_multiple_side_effects() {
+            let container = Container::new();
+
+            assert_eq!(container.read(build_counter_capsule), 1);
+            let ((s1, ss1), (s2, ss2)) = container.read(two_side_effects_capsule);
+            assert_eq!(s1, 0);
+            assert_eq!(s2, 1);
+
+            container.read(txn_runner_capsule)(Box::new(move || {
+                ss1(1);
+                ss2(2);
+            }));
+
+            assert_eq!(container.read(build_counter_capsule), 2);
+            let ((s1, _), (s2, _)) = container.read(two_side_effects_capsule);
+            assert_eq!(s1, 1);
+            assert_eq!(s2, 2);
+        }
+
+        #[test]
+        fn multiple_capsules_with_one_side_effect_each() {
+            let container = Container::new();
+
+            assert_eq!(container.read(build_counter_capsule), 1);
+            let ((s1, ss1), (s2, _)) = container.read(two_side_effects_capsule);
+            let (s3, ss3) = container.read(another_capsule);
+            assert_eq!(s1, 0);
+            assert_eq!(s2, 1);
+            assert_eq!(s3, 2);
+
+            container.read(txn_runner_capsule)(Box::new(move || {
+                ss1(123);
+                ss3(123);
+            }));
+
+            assert_eq!(container.read(build_counter_capsule), 2);
+            let ((s1, _), (s2, _)) = container.read(two_side_effects_capsule);
+            let (s3, _) = container.read(another_capsule);
+            assert_eq!(s1, 123);
+            assert_eq!(s2, 1);
+            assert_eq!(s3, 123);
+        }
+
+        #[test]
+        fn multiple_capsules_with_multiple_side_effects() {
+            let container = Container::new();
+
+            assert_eq!(container.read(build_counter_capsule), 1);
+            let ((s1, _), (s2, _)) = container.read(two_side_effects_capsule);
+            let (s3, _) = container.read(another_capsule);
+            assert_eq!(s1, 0);
+            assert_eq!(s2, 1);
+            assert_eq!(s3, 2);
+
+            container.read(batch_all_updates_action)(123);
+
+            assert_eq!(container.read(build_counter_capsule), 2);
+            let ((s1, _), (s2, _)) = container.read(two_side_effects_capsule);
+            let (s3, _) = container.read(another_capsule);
+            assert_eq!(s1, 123);
+            assert_eq!(s2, 123);
+            assert_eq!(s3, 123);
+        }
+
+        #[test]
+        fn nested_transactions() {
+            let container = Container::new();
+
+            assert_eq!(container.read(build_counter_capsule), 1);
+            let ((s1, ss1), (s2, _)) = container.read(two_side_effects_capsule);
+            let (s3, ss3) = container.read(another_capsule);
+            assert_eq!(s1, 0);
+            assert_eq!(s2, 1);
+            assert_eq!(s3, 2);
+
+            container.read(txn_runner_capsule)({
+                let container = container.clone();
+                Box::new(move || {
+                    ss1(111);
+                    container.read(batch_all_updates_action)(123);
+                    ss3(111);
+                })
+            });
+
+            assert_eq!(container.read(build_counter_capsule), 2);
+            let ((s1, _), (s2, _)) = container.read(two_side_effects_capsule);
+            let (s3, _) = container.read(another_capsule);
+            assert_eq!(s1, 123);
+            assert_eq!(s2, 123);
+            assert_eq!(s3, 111);
+        }
     }
 }

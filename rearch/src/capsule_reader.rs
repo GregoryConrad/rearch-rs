@@ -59,7 +59,7 @@ impl<'scope, 'total> CapsuleReader<'scope, 'total> {
                 }
 
                 txn.ensure_initialized(capsule);
-                txn.add_dependency_relationship(Arc::clone(&other), this);
+                txn.add_dependency_relationship(&other, this);
                 txn.try_read_ref_raw::<C>(&other)
                     .expect("Ensured capsule was initialized above")
             }

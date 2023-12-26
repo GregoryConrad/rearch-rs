@@ -1,19 +1,8 @@
-use dyn_clone::DynClone;
 use std::{any::Any, cell::OnceCell};
 
-use crate::{CData, SideEffect, EFFECT_FAILED_CAST_MSG};
-
-pub trait SideEffectRebuilder:
-    Fn(Box<dyn FnOnce(&mut Box<dyn Any + Send>)>) + Send + Sync + DynClone + 'static
-{
-}
-impl<F> SideEffectRebuilder for F where
-    F: Fn(Box<dyn FnOnce(&mut Box<dyn Any + Send>)>) + Send + Sync + Clone + 'static
-{
-}
-dyn_clone::clone_trait_object!(SideEffectRebuilder);
-
-const PREVIOUS_INIT_FAILED_MSG: &str = "Side effect should've been initialized above";
+use crate::{
+    CData, SideEffect, SideEffectStateMutater, SideEffectTxnRunner, EFFECT_FAILED_CAST_MSG,
+};
 
 /// Registers the given side effect and returns its build api.
 /// You can only call register once on purpose (it consumes self);
@@ -22,23 +11,25 @@ const PREVIOUS_INIT_FAILED_MSG: &str = "Side effect should've been initialized a
 /// simply call `register()` with no arguments (or use the `as_listener()` side effect).
 pub struct SideEffectRegistrar<'a> {
     side_effect: &'a mut OnceCell<Box<dyn Any + Send>>,
-    rebuilder: Box<dyn SideEffectRebuilder>,
+    side_effect_state_mutater: SideEffectStateMutater,
+    side_effect_txn_runner: SideEffectTxnRunner,
 }
 
 impl<'a> SideEffectRegistrar<'a> {
-    #[allow(clippy::doc_markdown)] // false positive
     /// Creates a new `SideEffectRegistrar`.
     ///
     /// This is public only to enable easier mocking in your code,
-    /// or for other libraries looking to integrate deeply with ReArch;
+    /// or for other libraries looking to deeply integrate;
     /// do not use this method in other contexts.
     pub fn new(
         side_effect: &'a mut OnceCell<Box<dyn Any + Send>>,
-        rebuilder: Box<dyn SideEffectRebuilder>,
+        side_effect_state_mutater: SideEffectStateMutater,
+        side_effect_txn_runner: SideEffectTxnRunner,
     ) -> Self {
         Self {
             side_effect,
-            rebuilder,
+            side_effect_state_mutater,
+            side_effect_txn_runner,
         }
     }
 
@@ -46,9 +37,18 @@ impl<'a> SideEffectRegistrar<'a> {
     pub fn register<S: SideEffect<'a>>(self, effect: S) -> S::Api {
         effect.build(self)
     }
+}
 
+impl<'a> SideEffectRegistrar<'a> {
     /// The basic building block for all side effects.
-    pub(crate) fn raw<T>(self, initial: T) -> (&'a mut T, impl CData + Fn(Box<dyn FnOnce(&mut T)>))
+    pub(crate) fn raw<T>(
+        self,
+        initial: T,
+    ) -> (
+        &'a mut T,
+        impl CData + Fn(Box<dyn FnOnce(&mut T)>),
+        SideEffectTxnRunner,
+    )
     where
         T: Send + 'static,
     {
@@ -56,18 +56,18 @@ impl<'a> SideEffectRegistrar<'a> {
         let data = self
             .side_effect
             .get_mut()
-            .expect(PREVIOUS_INIT_FAILED_MSG)
+            .expect("Side effect should've been initialized in get_or_init above")
             .downcast_mut::<T>()
             .unwrap_or_else(|| panic!("{}", EFFECT_FAILED_CAST_MSG));
-        let rebuild = move |mutation: Box<dyn FnOnce(&mut T)>| {
-            (self.rebuilder)(Box::new(|data| {
+        let state_mutater = move |mutation: Box<dyn FnOnce(&mut T)>| {
+            (self.side_effect_state_mutater)(Box::new(|data| {
                 let data = data
                     .downcast_mut::<T>()
                     .unwrap_or_else(|| panic!("{}", EFFECT_FAILED_CAST_MSG));
                 mutation(data);
             }));
         };
-        (data, rebuild)
+        (data, state_mutater, self.side_effect_txn_runner)
     }
 }
 

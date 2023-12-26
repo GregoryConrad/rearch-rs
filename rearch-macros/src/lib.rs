@@ -19,12 +19,12 @@ pub fn generate_tuple_side_effect_impl(input: TokenStream) -> TokenStream {
         quote! {
             self.#i.build(SideEffectRegistrar::new(&mut all_states.#i, {
                 let rebuild_all = rebuild_all.clone();
-                Box::new(move |mutation: Box<dyn FnOnce(&mut Box<dyn Any + Send>)>| {
+                Arc::new(move |mutation: Box<dyn FnOnce(&mut dyn Any)>| {
                     rebuild_all(Box::new(move |all_states| {
-                        mutation(all_states.#i.get_mut().expect(EFFECT_FAILED_CAST_MSG));
+                        mutation(all_states.#i.get_mut().expect(EFFECT_FAILED_CAST_MSG).as_mut());
                     }));
                 })
-            }))
+            }, Arc::clone(&run_txn)))
         }
     });
     let effect_impl = quote! {
@@ -33,7 +33,7 @@ pub fn generate_tuple_side_effect_impl(input: TokenStream) -> TokenStream {
 
             #[allow(clippy::unused_unit)]
             fn build(self, registrar: SideEffectRegistrar<'a>) -> Self::Api {
-                let (all_states, rebuild_all) = registrar.raw((
+                let (all_states, rebuild_all, run_txn) = registrar.raw((
                     #(#once_cell_inits),*
                 ));
                 (#(#individual_apis),*)
