@@ -9,8 +9,6 @@ use std::{
     sync::{Arc, Mutex, Weak},
 };
 
-pub mod side_effects;
-
 mod capsule_key;
 pub use capsule_key::*;
 
@@ -508,6 +506,33 @@ impl CapsuleManager {
 mod tests {
     use crate::*;
 
+    mod effects {
+        use super::*;
+
+        pub fn as_listener<'a>() -> impl SideEffect<'a, Api = ()> {}
+
+        pub fn state<'a, T: Send + 'static>(
+            initial: T,
+        ) -> impl SideEffect<'a, Api = (&'a mut T, impl CData + Fn(T))> {
+            move |register: SideEffectRegistrar<'a>| {
+                let (state, rebuild, _) = register.raw(initial);
+                let set_state = move |new_state| {
+                    rebuild(Box::new(|state| *state = new_state));
+                };
+                (state, set_state)
+            }
+        }
+
+        pub fn is_first_build<'a>() -> impl SideEffect<'a, Api = bool> {
+            move |register: SideEffectRegistrar<'a>| {
+                let (has_built_before, _, _) = register.raw(false);
+                let is_first_build = !*has_built_before;
+                *has_built_before = true;
+                is_first_build
+            }
+        }
+    }
+
     #[test]
     fn container_send_sync() {
         fn assert_send_sync<T: Send + Sync>() {}
@@ -544,10 +569,10 @@ mod tests {
     }
 
     mod state_updates {
-        use crate::*;
+        use super::*;
 
         fn stateful(CapsuleHandle { register, .. }: CapsuleHandle) -> (u8, impl CData + Fn(u8)) {
-            let (state, set_state) = register.register(side_effects::state(0));
+            let (state, set_state) = register.register(effects::state(0));
             (*state, set_state)
         }
 
@@ -592,8 +617,7 @@ mod tests {
         fn foo(
             CapsuleHandle { register, .. }: CapsuleHandle,
         ) -> (u8, u8, impl CData + Fn(u8), impl CData + Fn(u8)) {
-            let ((s1, ss1), (s2, ss2)) =
-                register.register((side_effects::state(0), side_effects::state(1)));
+            let ((s1, ss1), (s2, ss2)) = register.register((effects::state(0), effects::state(1)));
             (*s1, *s2, ss1, ss2)
         }
 
@@ -613,14 +637,21 @@ mod tests {
     #[cfg(feature = "better-api")]
     #[test]
     fn get_and_register() {
+        fn rebuilder<'a>() -> impl SideEffect<'a, Api = impl CData + Fn()> {
+            move |register: SideEffectRegistrar<'a>| {
+                let (_, rebuild, _) = register.raw(());
+                move || rebuild(Box::new(|_| {}))
+            }
+        }
+
         fn rebuildable(CapsuleHandle { register, .. }: CapsuleHandle) -> impl CData + Fn() {
-            register(side_effects::rebuilder(), side_effects::as_listener()).0
+            register(rebuilder(), effects::as_listener()).0
         }
 
         fn build_counter(CapsuleHandle { mut get, register }: CapsuleHandle) -> usize {
             get(rebuildable); // mark dep
 
-            let is_first_build = register(side_effects::is_first_build());
+            let is_first_build = register(effects::is_first_build());
             if is_first_build {
                 1
             } else {
@@ -731,7 +762,7 @@ mod tests {
 
         fn stateful(CapsuleHandle { register, .. }: CapsuleHandle) -> (u32, impl CData + Fn(u32)) {
             increment_build_count(stateful);
-            let (state, set_state) = register.register(side_effects::state(0));
+            let (state, set_state) = register.register(effects::state(0));
             (*state, set_state)
         }
 
@@ -793,7 +824,7 @@ mod tests {
         }
 
         fn impure_sink(CapsuleHandle { mut get, register }: CapsuleHandle) {
-            register.register(side_effects::as_listener());
+            register.register(effects::as_listener());
             _ = get.get(ChangingWatcher);
             _ = get.get(UnchangingWatcher);
         }
@@ -929,7 +960,7 @@ mod tests {
     #[test]
     fn dynamic_and_static_capsules() {
         fn stateful(CapsuleHandle { register, .. }: CapsuleHandle) -> (u8, impl CData + Fn(u8)) {
-            let (state, set_state) = register.register(side_effects::state(0));
+            let (state, set_state) = register.register(effects::state(0));
             (*state, set_state)
         }
         struct Cell(u8);
@@ -968,7 +999,7 @@ mod tests {
     #[test]
     fn complex_dependency_graph() {
         fn stateful_a(CapsuleHandle { register, .. }: CapsuleHandle) -> (u8, impl CData + Fn(u8)) {
-            let (state, set_state) = register.register(side_effects::state(0));
+            let (state, set_state) = register.register(effects::state(0));
             (*state, set_state)
         }
 
@@ -1056,20 +1087,19 @@ mod tests {
     }
 
     mod side_effect_txns {
-        use crate::*;
+        use super::*;
 
         fn two_side_effects_capsule(
             CapsuleHandle { register, .. }: CapsuleHandle,
         ) -> ((u8, impl CData + Fn(u8)), (u8, impl CData + Fn(u8))) {
-            let ((s1, ss1), (s2, ss2)) =
-                register.register((side_effects::state(0), side_effects::state(1)));
+            let ((s1, ss1), (s2, ss2)) = register.register((effects::state(0), effects::state(1)));
             ((*s1, ss1), (*s2, ss2))
         }
 
         fn another_capsule(
             CapsuleHandle { register, .. }: CapsuleHandle,
         ) -> (u8, impl CData + Fn(u8)) {
-            let (state, set_state) = register.register(side_effects::state(2));
+            let (state, set_state) = register.register(effects::state(2));
             (*state, set_state)
         }
 
@@ -1078,7 +1108,7 @@ mod tests {
         ) -> impl CData + Fn(u8) {
             let ((_, set_state1), (_, set_state2)) = get.get(two_side_effects_capsule);
             let (_, set_state3) = get.get(another_capsule);
-            let (_, _, run_txn) = register.register(side_effects::raw(()));
+            let (_, _, run_txn) = register.raw(());
             move |n| {
                 let set_state1 = set_state1.clone();
                 let set_state2 = set_state2.clone();
@@ -1092,7 +1122,7 @@ mod tests {
         }
 
         fn build_counter_capsule(CapsuleHandle { mut get, register }: CapsuleHandle) -> u8 {
-            let is_first_build = register.register(side_effects::is_first_build());
+            let is_first_build = register.register(effects::is_first_build());
 
             _ = get.get(two_side_effects_capsule);
             _ = get.get(another_capsule);

@@ -16,18 +16,16 @@ ReArch = re-imagined approach to application design and architecture
 
 
 ## Features
-Specifically, ReArch is a:
-- ⚡️ Reactive
-- 🧮 Functional
-- 🔍 Testable
-- 🧱 Composable
-- 🔌 Extendable
-- ⬆️ Scalable
-- 💉 Dependency Injection
+Specifically, ReArch is a novel solution to:
+- ⚡️ State Management
+- 🧮 Incremental Computation
+- 🧱 Component-Based Software Engineering
 
-Framework.
-
-That's a mouthful! But in short, ReArch is an entirely new approach to building applications.
+And with those, come:
+- Reactivity through declarative code
+- Loose coupling and high testability
+- App-level composability via a functional approach to dependency inversion
+- [Feature composition through _side effects_](https://blog.gsconrad.com/2023/12/22/the-problem-with-state-management.html)
 
 
 ## In a Nutshell
@@ -40,9 +38,10 @@ Define your "capsules" (en-_capsulated_ pieces of state) at the top level:
 
 // This capsule provides the count and a way to increment that count.
 fn count_manager(CapsuleHandle { register, .. }: CapsuleHandle) -> (u8, impl CData + Fn()) {
-    let (count, set_count) = register(side_effects::state(0));
-    let increment_count = || set_count(count + 1);
-    (*count, increment_count)
+    let (count, set_count) = register(effects::state(0));
+    let count = *count; // the state side effect returns a &mut T
+    let increment_count = move || set_count(count + 1);
+    (count, increment_count)
 }
 
 // This capsule provides the count, plus one.
@@ -52,16 +51,29 @@ fn count_plus_one_capsule(CapsuleHandle { mut get, .. }: CapsuleHandle) -> u8 {
 }
 
 let container = Container::new();
-let ((count, increment_count), count_plus_one) = container.read((count, count_plus_one));
+
+let ((count, increment_count), count_plus_one) =
+    container.read((count_manager, count_plus_one_capsule));
+assert_eq!(count, 0);
+assert_eq!(count_plus_one, 1);
+
+increment_count();
+
+let ((count, _), count_plus_one) = container.read((count_manager, count_plus_one_capsule));
+assert_eq!(count, 1);
+assert_eq!(count_plus_one, 2);
 ```
 
 
 ## Getting Started
 Simply run:
-`cargo add rearch`
+`cargo add rearch rearch-effects`
 
 Then, create one container for your application:
-```dart
+```rust
+use rearch::*;
+use rearch_effects as effects;
+
 fn main() {
   let container = Container::new();
   // Use the container.

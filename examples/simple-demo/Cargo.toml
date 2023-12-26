@@ -1,6 +1,7 @@
 [package]
-name = "rearch-tokio"
-version = "0.5.1"
+name = "example-simple-demo"
+version = "0.0.0"
+publish = false
 edition.workspace = true
 license.workspace = true
 description.workspace = true
@@ -18,4 +19,3 @@ workspace = true
 [dependencies]
 rearch = { workspace = true }
 rearch-effects = { workspace = true }
-tokio = { version = "1.*", default-features = false, features = ["rt"] }
