@@ -1,4 +1,4 @@
-use std::{cell::RefCell, future::Future, rc::Rc, sync::Arc};
+use std::future::Future;
 
 use rearch::{SideEffect, SideEffectRegistrar};
 use rearch_effects as effects;
@@ -43,9 +43,10 @@ impl<T> AsyncPersistState<T> {
     }
 }
 
+/*
 #[must_use]
-pub fn future<'a, T, F>(
-) -> impl SideEffect<'a, Api = (impl Fn() -> AsyncState<T> + 'a, impl FnMut(F) + 'a)>
+pub fn future<T, F>(
+) -> impl for<'a> SideEffect<Api<'a> = (impl Fn() -> AsyncState<T> + 'a, impl FnMut(F) + 'a)>
 where
     T: Clone + Send + 'static,
     F: Future<Output = T> + Send + 'static,
@@ -75,11 +76,11 @@ where
         (get, set)
     }
 }
+*/
 
 #[must_use]
-pub fn mutation<'a, T, F>() -> impl SideEffect<
-    'a,
-    Api = (
+pub fn mutation<T, F>() -> impl for<'a> SideEffect<
+    Api<'a> = (
         AsyncState<T>,
         impl Fn(F) + Clone + Send + Sync,
         impl Fn() + Clone + Send + Sync,
@@ -89,7 +90,7 @@ where
     T: Clone + Send + 'static,
     F: Future<Output = T> + Send + 'static,
 {
-    move |register: SideEffectRegistrar<'a>| {
+    move |register: SideEffectRegistrar| {
         let ((state, rebuild, _), (_, on_change)) = register.register((
             effects::raw(AsyncState::Idle(None)),
             // This immitates run_on_change, but for external use (outside of build)
@@ -125,10 +126,11 @@ where
     }
 }
 
-pub fn async_persist<'a, T, R, Reader, Writer, ReadFuture, WriteFuture>(
+/*
+pub fn async_persist<T, R, Reader, Writer, ReadFuture, WriteFuture>(
     read: Reader,
     write: Writer,
-) -> impl SideEffect<'a, Api = (AsyncPersistState<R>, impl FnMut(T) + Send + Sync + Clone)>
+) -> impl for<'a> SideEffect<Api<'a> = (AsyncPersistState<R>, impl FnMut(T) + Send + Sync + Clone)>
 where
     T: Send + 'static,
     R: Clone + Send + 'static,
@@ -137,7 +139,7 @@ where
     ReadFuture: Future<Output = R> + Send + 'static,
     WriteFuture: Future<Output = R> + Send + 'static,
 {
-    move |register: SideEffectRegistrar<'a>| {
+    move |register: SideEffectRegistrar| {
         let ((get_read, mut set_read), (write_state, set_write, _), is_first_build) =
             register.register((future(), mutation(), effects::is_first_build()));
 
@@ -167,3 +169,4 @@ where
         (state, persist)
     }
 }
+*/

@@ -28,11 +28,11 @@ pub fn generate_tuple_side_effect_impl(input: TokenStream) -> TokenStream {
         }
     });
     let effect_impl = quote! {
-        impl<'a, #(#types: SideEffect<'a>),*> SideEffect<'a> for (#(#types),*) {
-            type Api = (#(#types::Api),*);
+        impl<#(#types: SideEffect),*> SideEffect for (#(#types),*) {
+            type Api<'registrar> = (#(#types::Api<'registrar>),*);
 
             #[allow(clippy::unused_unit)]
-            fn build(self, registrar: SideEffectRegistrar<'a>) -> Self::Api {
+            fn build(self, registrar: SideEffectRegistrar<'_>) -> Self::Api<'_> {
                 let (all_states, rebuild_all, run_txn) = registrar.raw((
                     #(#once_cell_inits),*
                 ));

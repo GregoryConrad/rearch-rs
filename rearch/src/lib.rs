@@ -92,10 +92,7 @@ pub struct CapsuleHandle<'txn_scope, 'txn_total, 'build> {
 /// The key observation about side effects is that they form a tree, where each side effect:
 /// - Has its own private state (including composing other side effects together)
 /// - Presents some api to the build method, probably including a way to rebuild & update its state
-///
-/// *DO NOT MANUALLY IMPLEMENT THIS TRAIT YOURSELF!*
-/// It is an internal implementation detail that could be changed or removed in the future.
-pub trait SideEffect<'a> {
+pub trait SideEffect {
     /// The type exposed in the capsule build function when this side effect is registered;
     /// in other words, this is the api exposed by the side effect.
     ///
@@ -103,14 +100,14 @@ pub trait SideEffect<'a> {
     /// - Data and/or state in this side effect
     /// - Function callbacks (perhaps to trigger a rebuild and/or update the side effect state)
     /// - Anything else imaginable!
-    type Api;
+    type Api<'registrar>;
 
     /// Construct this side effect's `Api` via the given [`SideEffectRegistrar`].
-    fn build(self, registrar: SideEffectRegistrar<'a>) -> Self::Api;
+    fn build(self, registrar: SideEffectRegistrar) -> Self::Api<'_>;
 }
-impl<'a, T, F: FnOnce(SideEffectRegistrar<'a>) -> T> SideEffect<'a> for F {
-    type Api = T;
-    fn build(self, registrar: SideEffectRegistrar<'a>) -> Self::Api {
+impl<T, F: FnOnce(SideEffectRegistrar) -> T> SideEffect for F {
+    type Api<'registrar> = T;
+    fn build(self, registrar: SideEffectRegistrar) -> Self::Api<'_> {
         self(registrar)
     }
 }
@@ -185,7 +182,6 @@ impl Container {
         capsules.read(self)
     }
 
-    /* TODO(GregoryConrad): uncomment this listener section once we have side effects figured out
     /// Provides a mechanism to *temporarily* listen to changes in some capsule(s).
     /// The provided listener is called once at the time of the listener's registration,
     /// and then once again everytime a dependency changes.
@@ -195,7 +191,7 @@ impl Container {
     ///
     /// Thus, if you want the handle to live for as long as the Container itself,
     /// it is instead recommended to create a non-idempotent capsule
-    /// (use the [`side_effects::as_listener()`] side effect)
+    /// (use the `effects::as_listener()` side effect)
     /// that acts as your listener. When you normally would call `Container::listen()`,
     /// instead call `container.read(my_non_idempotent_listener)` to initialize it.
     ///
@@ -203,25 +199,24 @@ impl Container {
     /// Panics if you attempt to register the same listener twice,
     /// before the first `ListenerHandle` is dropped.
     #[must_use]
-    pub fn listen<ListenerEffect, EffectFactory, Listener>(
+    pub fn listen<Effect, EffectFactory, Listener>(
         &self,
         effect_factory: EffectFactory,
         listener: Listener,
     ) -> ListenerHandle
     where
-        ListenerEffect: for<'a> SideEffect<'a>,
-        EffectFactory: Fn() -> ListenerEffect + Send + Clone + 'static,
-        Listener: Fn(CapsuleReader, <ListenerEffect as SideEffect>::Api) + Send + 'static,
+        Effect: SideEffect,
+        EffectFactory: 'static + Send + Fn() -> Effect,
+        Listener: Fn(CapsuleReader, <Effect as SideEffect>::Api<'_>) + Send + 'static,
     {
         // We make a temporary non-idempotent capsule for the listener so that
         // it doesn't get disposed by the idempotent gc
         let tmp_capsule = move |CapsuleHandle { get, register }: CapsuleHandle| {
-            let effect_factory = effect_factory.clone();
             let effect = effect_factory();
-            let effect_state = register.register(effect);
-            listener(get, effect_state);
+            let effect_api = register.register(effect);
+            listener(get, effect_api);
         };
-        let id = tmp_capsule.type_id();
+        let id = tmp_capsule.id();
 
         // Put the temporary capsule into the container to listen to updates
         self.with_write_txn(move |txn| {
@@ -239,7 +234,6 @@ impl Container {
             store: Arc::downgrade(&self.0),
         }
     }
-    */
 }
 
 /// Represents a handle onto a particular listener, as created with `Container::listen()`.
@@ -259,7 +253,7 @@ pub struct ListenerHandle {
 impl Drop for ListenerHandle {
     fn drop(&mut self) {
         if let Some(store) = self.store.upgrade() {
-            // Note: The node is guaranteed to be in the graph here since it is a listener.
+            // NOTE: The node is guaranteed to be in the graph here since it is a listener.
             let orchestrator = SideEffectTxnOrchestrator(Weak::clone(&self.store));
             store.with_write_txn(orchestrator, |txn| txn.dispose_node(&self.id));
         }
@@ -509,26 +503,33 @@ mod tests {
     mod effects {
         use super::*;
 
-        pub fn as_listener<'a>() -> impl SideEffect<'a, Api = ()> {}
+        pub fn as_listener() -> impl for<'a> SideEffect<Api<'a> = ()> {}
 
-        pub fn state<'a, T: Send + 'static>(
+        pub fn cloned_state<T: Clone + Send + 'static>(
             initial: T,
-        ) -> impl SideEffect<'a, Api = (&'a mut T, impl CData + Fn(T))> {
-            move |register: SideEffectRegistrar<'a>| {
+        ) -> impl for<'a> SideEffect<Api<'a> = (T, impl CData + Fn(T))> {
+            move |register: SideEffectRegistrar| {
                 let (state, rebuild, _) = register.raw(initial);
                 let set_state = move |new_state| {
                     rebuild(Box::new(|state| *state = new_state));
                 };
-                (state, set_state)
+                (state.clone(), set_state)
             }
         }
 
-        pub fn is_first_build<'a>() -> impl SideEffect<'a, Api = bool> {
-            move |register: SideEffectRegistrar<'a>| {
+        pub fn is_first_build() -> impl for<'a> SideEffect<Api<'a> = bool> {
+            move |register: SideEffectRegistrar| {
                 let (has_built_before, _, _) = register.raw(false);
                 let is_first_build = !*has_built_before;
                 *has_built_before = true;
                 is_first_build
+            }
+        }
+
+        pub fn rebuilder() -> impl for<'a> SideEffect<Api<'a> = impl CData + Fn()> {
+            move |register: SideEffectRegistrar| {
+                let (_, rebuild, _) = register.raw(());
+                move || rebuild(Box::new(|_| {}))
             }
         }
     }
@@ -572,8 +573,7 @@ mod tests {
         use super::*;
 
         fn stateful(CapsuleHandle { register, .. }: CapsuleHandle) -> (u8, impl CData + Fn(u8)) {
-            let (state, set_state) = register.register(effects::state(0));
-            (*state, set_state)
+            register.register(effects::cloned_state(0))
         }
 
         fn dependent(CapsuleHandle { mut get, .. }: CapsuleHandle) -> u8 {
@@ -617,8 +617,9 @@ mod tests {
         fn foo(
             CapsuleHandle { register, .. }: CapsuleHandle,
         ) -> (u8, u8, impl CData + Fn(u8), impl CData + Fn(u8)) {
-            let ((s1, ss1), (s2, ss2)) = register.register((effects::state(0), effects::state(1)));
-            (*s1, *s2, ss1, ss2)
+            let ((s1, ss1), (s2, ss2)) =
+                register.register((effects::cloned_state(0), effects::cloned_state(1)));
+            (s1, s2, ss1, ss2)
         }
 
         let container = Container::new();
@@ -637,15 +638,8 @@ mod tests {
     #[cfg(feature = "better-api")]
     #[test]
     fn get_and_register() {
-        fn rebuilder<'a>() -> impl SideEffect<'a, Api = impl CData + Fn()> {
-            move |register: SideEffectRegistrar<'a>| {
-                let (_, rebuild, _) = register.raw(());
-                move || rebuild(Box::new(|_| {}))
-            }
-        }
-
         fn rebuildable(CapsuleHandle { register, .. }: CapsuleHandle) -> impl CData + Fn() {
-            register(rebuilder(), effects::as_listener()).0
+            register(effects::rebuilder(), effects::as_listener()).0
         }
 
         fn build_counter(CapsuleHandle { mut get, register }: CapsuleHandle) -> usize {
@@ -667,78 +661,76 @@ mod tests {
         assert_eq!(container.read(build_counter), 3);
     }
 
-    /*
-        #[test]
-        fn listener_gets_updates() {
-            use std::sync::{Arc, Mutex};
+    #[test]
+    fn listener_gets_updates() {
+        use std::sync::{Arc, Mutex};
 
-            fn stateful(
-                CapsuleHandle { register, .. }: CapsuleHandle,
-            ) -> (u8, impl CData + Fn(u8)) {
-                let (state, set_state) = register.register(side_effects::state(0));
-                (*state, set_state)
-            }
-
-            let states = Arc::new(Mutex::new(Vec::new()));
-
-            let effect_factory = || ();
-            let listener = {
-                let states = states.clone();
-                move |mut reader: CapsuleReader, _| {
-                    let mut states = states.lock().unwrap();
-                    states.push(reader.get(stateful).0);
-                }
-            };
-
-            let container = Container::new();
-
-            container.read(stateful).1(1);
-            let handle = container.listen(effect_factory, listener.clone());
-            container.read(stateful).1(2);
-            container.read(stateful).1(3);
-
-            drop(handle);
-            container.read(stateful).1(4);
-
-            container.read(stateful).1(5);
-            let handle = container.listen(effect_factory, listener);
-            container.read(stateful).1(6);
-            container.read(stateful).1(7);
-
-            drop(handle);
-            container.read(stateful).1(8);
-
-            let states = states.lock().unwrap();
-            assert_eq!(*states, vec![1, 2, 3, 5, 6, 7]);
+        fn stateful(CapsuleHandle { register, .. }: CapsuleHandle) -> (u8, impl CData + Fn(u8)) {
+            register.register(effects::cloned_state(0))
         }
 
-        #[test]
-        fn listener_side_effects_update() {
-            use std::sync::{Arc, Mutex};
+        let states = Arc::new(Mutex::new(Vec::new()));
 
-            fn rebuildable(
-                CapsuleHandle { register, .. }: CapsuleHandle,
-            ) -> (impl CData + Fn()) {
-                register.register(side_effects::rebuilder())
+        let effect_factory = || ();
+        let listener = {
+            let states = states.clone();
+            move |mut reader: CapsuleReader, _| {
+                let mut states = states.lock().unwrap();
+                states.push(reader.get(stateful).0);
             }
+        };
 
-            let states = Arc::new(Mutex::new(Vec::new()));
+        let container = Container::new();
 
-            let container = Container::new();
-            fn thing() -> impl SideEffect<'a, Api = bool> {
-                side_effects::is_first_build()
-            }
-            let handle = container.listen(thing, |mut get, is_first_build| {
-                get.get(rebuildable);
-                states.clone().lock().unwrap().push(is_first_build);
-            });
+        container.read(stateful).1(1);
+        let handle = container.listen(effect_factory, listener.clone());
+        container.read(stateful).1(2);
+        container.read(stateful).1(3);
 
-            container.read(rebuildable)();
+        drop(handle);
+        container.read(stateful).1(4);
 
-            let states = states.lock().unwrap();
-            assert_eq!(*states, vec![true, false])
+        container.read(stateful).1(5);
+        let handle = container.listen(effect_factory, listener);
+        container.read(stateful).1(6);
+        container.read(stateful).1(7);
+
+        drop(handle);
+        container.read(stateful).1(8);
+
+        let states = states.lock().unwrap();
+        assert_eq!(*states, vec![1, 2, 3, 5, 6, 7]);
+    }
+
+    #[test]
+    fn listener_side_effects_update() {
+        use std::sync::{Arc, Mutex};
+
+        fn rebuildable(CapsuleHandle { register, .. }: CapsuleHandle) -> (impl CData + Fn()) {
+            register.register(effects::rebuilder())
         }
-    */
+
+        let states = Arc::new(Mutex::new(Vec::new()));
+
+        let container = Container::new();
+        let handle = {
+            let states = states.clone();
+            container.listen(
+                || effects::is_first_build(),
+                move |mut get, is_first_build| {
+                    let _ = get.get(rebuildable);
+                    states.lock().unwrap().push(is_first_build);
+                },
+            )
+        };
+
+        container.read(rebuildable)();
+
+        let states = states.lock().unwrap();
+        assert_eq!(*states, vec![true, false]);
+
+        drop(handle);
+    }
 
     #[test]
     fn eq_check_skips_unneeded_rebuilds() {
@@ -762,8 +754,7 @@ mod tests {
 
         fn stateful(CapsuleHandle { register, .. }: CapsuleHandle) -> (u32, impl CData + Fn(u32)) {
             increment_build_count(stateful);
-            let (state, set_state) = register.register(effects::state(0));
-            (*state, set_state)
+            register.register(effects::cloned_state(0))
         }
 
         struct UnchangingIdempotentDep;
@@ -960,8 +951,7 @@ mod tests {
     #[test]
     fn dynamic_and_static_capsules() {
         fn stateful(CapsuleHandle { register, .. }: CapsuleHandle) -> (u8, impl CData + Fn(u8)) {
-            let (state, set_state) = register.register(effects::state(0));
-            (*state, set_state)
+            register.register(effects::cloned_state(0))
         }
         struct Cell(u8);
         impl Capsule for Cell {
@@ -999,8 +989,7 @@ mod tests {
     #[test]
     fn complex_dependency_graph() {
         fn stateful_a(CapsuleHandle { register, .. }: CapsuleHandle) -> (u8, impl CData + Fn(u8)) {
-            let (state, set_state) = register.register(effects::state(0));
-            (*state, set_state)
+            register.register(effects::cloned_state(0))
         }
 
         fn a(CapsuleHandle { mut get, .. }: CapsuleHandle) -> u8 {
@@ -1092,15 +1081,13 @@ mod tests {
         fn two_side_effects_capsule(
             CapsuleHandle { register, .. }: CapsuleHandle,
         ) -> ((u8, impl CData + Fn(u8)), (u8, impl CData + Fn(u8))) {
-            let ((s1, ss1), (s2, ss2)) = register.register((effects::state(0), effects::state(1)));
-            ((*s1, ss1), (*s2, ss2))
+            register.register((effects::cloned_state(0), effects::cloned_state(1)))
         }
 
         fn another_capsule(
             CapsuleHandle { register, .. }: CapsuleHandle,
         ) -> (u8, impl CData + Fn(u8)) {
-            let (state, set_state) = register.register(effects::state(2));
-            (*state, set_state)
+            register.register(effects::cloned_state(2))
         }
 
         fn batch_all_updates_action(
