@@ -176,7 +176,7 @@ impl ContainerWriteTxn<'_> {
             }
 
             if disposable_nodes.contains(&curr_id) {
-                // Note: dependency/dependent relationships will be ok after this,
+                // NOTE: dependency/dependent relationships will be ok after this,
                 // since we are disposing all dependents in the build order,
                 // because we are adding this node to changedNodes
                 self.dispose_single_node(&curr_id);

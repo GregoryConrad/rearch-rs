@@ -299,6 +299,8 @@ generate_capsule_list_impl!(A, B, C, D, E, F, G, H);
 /// All capsule data is stored within `data`, and all data flow graph nodes are stored in `nodes`.
 #[derive(Default)]
 struct ContainerStore {
+    // NOTE: we store capsule data in an Arc here because it provides faster clones than a Box.
+    // This is because the Arc will have low contention, as the clones are always behind a Mutex.
     data: concread::hashmap::HashMap<Id, Arc<dyn Any + Send + Sync>>,
     nodes: Mutex<std::collections::HashMap<Id, CapsuleManager>>,
     curr_side_effect_txn_modified_ids: ReentrantMutex<RefCell<Option<HashSet<Id>>>>,
@@ -351,7 +353,7 @@ impl SideEffectTxnOrchestrator {
 
         let orchestrator = self.clone();
         self.run_txn(Box::new(move || {
-            // Note: The node is guaranteed to be in the graph here since it registers a side effect.
+            // NOTE: The node is guaranteed to be in the graph here since it registers a side effect.
             store.with_write_txn(orchestrator, {
                 let id = &id;
                 move |txn| {
