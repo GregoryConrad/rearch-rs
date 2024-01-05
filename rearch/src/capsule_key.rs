@@ -16,7 +16,7 @@ use crate::Capsule;
 pub struct CapsuleKey(CapsuleKeyType);
 impl<T: Hash + Eq + Debug + Send + Sync + 'static> From<T> for CapsuleKey {
     fn from(key: T) -> Self {
-        Self(CapsuleKeyType::Dynamic(Box::new(key)))
+        Self(CapsuleKeyType::Dynamic(Arc::new(key)))
     }
 }
 
@@ -28,7 +28,17 @@ enum CapsuleKeyType<DynDynamicCapsuleKey: ?Sized = dyn DynamicCapsuleKey> {
     #[default]
     Static,
     /// A dynamic capsule, whose key is some hash-able data.
-    Dynamic(Box<DynDynamicCapsuleKey>),
+    Dynamic(Arc<DynDynamicCapsuleKey>),
+}
+// NOTE: we need a manual clone impl since the PartialEq derive workaround above
+// messes up the Clone derive.
+impl Clone for CapsuleKeyType {
+    fn clone(&self) -> Self {
+        match self {
+            CapsuleKeyType::Static => CapsuleKeyType::Static,
+            CapsuleKeyType::Dynamic(arc) => CapsuleKeyType::Dynamic(Arc::clone(arc)),
+        }
+    }
 }
 
 trait DynamicCapsuleKey: Debug + Send + Sync + 'static {
@@ -67,26 +77,24 @@ impl PartialEq for dyn DynamicCapsuleKey {
 impl Eq for dyn DynamicCapsuleKey {}
 
 #[allow(clippy::redundant_pub_crate)] // false positive
-#[derive(Debug, PartialEq, Eq, Hash)]
-pub(crate) struct InternalCapsuleKey {
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct CapsuleId {
     // We need to have a copy of the capsule's type to include in the Hash + Eq
     // so that if two capsules of different types have the same bytes as their key,
     // they won't be kept under the same entry in the map.
     capsule_type: TypeId,
     capsule_key: CapsuleKeyType,
 }
-#[allow(clippy::redundant_pub_crate)] // false positive
-pub(crate) type Id = Arc<InternalCapsuleKey>;
 
 #[allow(clippy::redundant_pub_crate)] // false positive
-pub(crate) trait CreateId {
-    fn id(&self) -> Id;
+pub(crate) trait CreateCapsuleId {
+    fn id(&self) -> CapsuleId;
 }
-impl<C: Capsule> CreateId for C {
-    fn id(&self) -> Id {
-        Arc::new(InternalCapsuleKey {
+impl<C: Capsule> CreateCapsuleId for C {
+    fn id(&self) -> CapsuleId {
+        CapsuleId {
             capsule_type: TypeId::of::<C>(),
             capsule_key: self.key().0,
-        })
+        }
     }
 }

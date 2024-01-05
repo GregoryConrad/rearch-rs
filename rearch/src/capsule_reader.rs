@@ -1,23 +1,23 @@
 use std::{any::Any, collections::HashMap, sync::Arc};
 
-use crate::{Capsule, ContainerWriteTxn, CreateId, Id};
+use crate::{Capsule, CapsuleId, ContainerWriteTxn, CreateCapsuleId};
 
 /// Allows you to read the current data of capsules based on the given state of the container txn.
 pub struct CapsuleReader<'scope, 'total>(InternalCapsuleReader<'scope, 'total>);
 enum InternalCapsuleReader<'scope, 'total> {
     /// For normal CapsuleReader operation
     Normal {
-        id: Id,
+        id: CapsuleId,
         txn: &'scope mut ContainerWriteTxn<'total>,
     },
     /// To enable easy mocking in testing
     Mock {
-        mocks: HashMap<Id, Arc<dyn Any + Send + Sync>>,
+        mocks: HashMap<CapsuleId, Arc<dyn Any + Send + Sync>>,
     },
 }
 
 impl<'scope, 'total> CapsuleReader<'scope, 'total> {
-    pub(crate) fn new(id: Id, txn: &'scope mut ContainerWriteTxn<'total>) -> Self {
+    pub(crate) fn new(id: CapsuleId, txn: &'scope mut ContainerWriteTxn<'total>) -> Self {
         Self(InternalCapsuleReader::Normal { id, txn })
     }
 
@@ -102,7 +102,7 @@ where
 }
 
 #[derive(Clone, Default)]
-pub struct MockCapsuleReaderBuilder(HashMap<Id, Arc<dyn Any + Send + Sync>>);
+pub struct MockCapsuleReaderBuilder(HashMap<CapsuleId, Arc<dyn Any + Send + Sync>>);
 
 impl MockCapsuleReaderBuilder {
     #[must_use]

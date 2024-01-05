@@ -247,7 +247,7 @@ impl Container {
 /// that acts as your listener. When you normally would call `container.listen()`,
 /// instead call `container.read(my_nonidempotent_listener)` to initialize it.
 pub struct ListenerHandle {
-    id: Id,
+    id: CapsuleId,
     store: Weak<ContainerStore>,
 }
 impl Drop for ListenerHandle {
@@ -301,9 +301,9 @@ generate_capsule_list_impl!(A, B, C, D, E, F, G, H);
 struct ContainerStore {
     // NOTE: we store capsule data in an Arc here because it provides faster clones than a Box.
     // This is because the Arc will have low contention, as the clones are always behind a Mutex.
-    data: concread::hashmap::HashMap<Id, Arc<dyn Any + Send + Sync>>,
-    nodes: Mutex<std::collections::HashMap<Id, CapsuleManager>>,
-    curr_side_effect_txn_modified_ids: ReentrantMutex<RefCell<Option<HashSet<Id>>>>,
+    data: concread::hashmap::HashMap<CapsuleId, Arc<dyn Any + Send + Sync>>,
+    nodes: Mutex<std::collections::HashMap<CapsuleId, CapsuleManager>>,
+    curr_side_effect_txn_modified_ids: ReentrantMutex<RefCell<Option<HashSet<CapsuleId>>>>,
 }
 impl ContainerStore {
     fn with_read_txn<R>(&self, to_run: impl FnOnce(&ContainerReadTxn) -> R) -> R {
@@ -337,7 +337,7 @@ type SideEffectTxnRunner = Arc<dyn Send + Sync + Fn(Box<dyn FnOnce()>)>;
 #[derive(Clone)]
 struct SideEffectTxnOrchestrator(Weak<ContainerStore>);
 impl SideEffectTxnOrchestrator {
-    fn run_mutation(&self, id: Id, mutation: SideEffectStateMutation) {
+    fn run_mutation(&self, id: CapsuleId, mutation: SideEffectStateMutation) {
         let Some(store) = self.0.upgrade() else {
             #[cfg(feature = "logging")]
             log::warn!(
@@ -405,9 +405,9 @@ impl SideEffectTxnOrchestrator {
         drop(curr_txn_modified_ids); // ensure the lock is held until after the last store write txn
     }
 
-    fn create_state_mutater_for_id(&self, id: Id) -> SideEffectStateMutater {
+    fn create_state_mutater_for_id(&self, id: CapsuleId) -> SideEffectStateMutater {
         let orchestrator = self.clone();
-        Arc::new(move |mutation| orchestrator.run_mutation(Arc::clone(&id), mutation))
+        Arc::new(move |mutation| orchestrator.run_mutation(CapsuleId::clone(&id), mutation))
     }
 
     fn create_txn_runner(&self) -> SideEffectTxnRunner {
@@ -433,9 +433,9 @@ const EXCLUSIVE_OWNER_MSG: &str =
 struct CapsuleManager {
     capsule: Option<Box<dyn Any + Send>>,
     side_effect: Option<OnceCell<Box<dyn Any + Send>>>,
-    dependencies: HashSet<Id>,
-    dependents: HashSet<Id>,
-    build: fn(Id, &mut ContainerWriteTxn) -> bool,
+    dependencies: HashSet<CapsuleId>,
+    dependents: HashSet<CapsuleId>,
+    build: fn(CapsuleId, &mut ContainerWriteTxn) -> bool,
 }
 
 impl CapsuleManager {
@@ -450,14 +450,14 @@ impl CapsuleManager {
     }
 
     // Builds a capsule's new data and puts it into the txn, returning true when the data changes.
-    fn build<C: Capsule>(id: Id, txn: &mut ContainerWriteTxn) -> bool {
+    fn build<C: Capsule>(id: CapsuleId, txn: &mut ContainerWriteTxn) -> bool {
         #[cfg(feature = "logging")]
         log::trace!("Building {} ({:?})", std::any::type_name::<C>(), id);
 
         let new_data = {
             let side_effect_state_mutater = txn
                 .side_effect_txn_orchestrator
-                .create_state_mutater_for_id(Arc::clone(&id));
+                .create_state_mutater_for_id(CapsuleId::clone(&id));
             let side_effect_txn_runner = txn.side_effect_txn_orchestrator.create_txn_runner();
 
             let (capsule, mut side_effect) = txn.take_capsule_and_side_effect(&id);
@@ -465,7 +465,7 @@ impl CapsuleManager {
                 .downcast_ref::<C>()
                 .expect("Types should be properly enforced due to generics")
                 .build(CapsuleHandle {
-                    get: CapsuleReader::new(Arc::clone(&id), txn),
+                    get: CapsuleReader::new(CapsuleId::clone(&id), txn),
                     register: SideEffectRegistrar::new(
                         &mut side_effect,
                         side_effect_state_mutater,
