@@ -1,6 +1,8 @@
 use rearch::{CData, SideEffect, SideEffectRegistrar};
 use std::{cell::OnceCell, sync::Arc};
 
+pub mod cloneable;
+
 // This workaround was derived from:
 // https://github.com/GregoryConrad/rearch-rs/issues/3#issuecomment-1872869363
 // And is needed because of:

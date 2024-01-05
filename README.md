@@ -38,8 +38,7 @@ Define your "capsules" (en-_capsulated_ pieces of state) at the top level:
 
 // This capsule provides the count and a way to increment that count.
 fn count_manager(CapsuleHandle { register, .. }: CapsuleHandle) -> (u8, impl CData + Fn()) {
-    let (count, set_count) = register(effects::state(0));
-    let count = *count; // the state side effect returns a &mut T
+    let (count, set_count) = register(effects::cloneable::state(0));
     let increment_count = move || set_count(count + 1);
     (count, increment_count)
 }
@@ -59,7 +58,8 @@ assert_eq!(count_plus_one, 1);
 
 increment_count();
 
-let ((count, _), count_plus_one) = container.read((count_manager, count_plus_one_capsule));
+let ((count, _), count_plus_one) =
+    container.read((count_manager, count_plus_one_capsule));
 assert_eq!(count, 1);
 assert_eq!(count_plus_one, 2);
 ```
