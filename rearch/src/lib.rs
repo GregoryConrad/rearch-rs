@@ -807,7 +807,7 @@ mod tests {
 
             fn build(&self, CapsuleHandle { mut get, .. }: CapsuleHandle) -> Self::Data {
                 increment_build_count(Self);
-                get.get(UnchangingIdempotentDep)
+                *get.get(UnchangingIdempotentDep)
             }
 
             fn eq(old: &Self::Data, new: &Self::Data) -> bool {
@@ -835,7 +835,7 @@ mod tests {
 
             fn build(&self, CapsuleHandle { mut get, .. }: CapsuleHandle) -> Self::Data {
                 increment_build_count(Self);
-                get.get(ChangingIdempotentDep)
+                *get.get(ChangingIdempotentDep)
             }
 
             fn eq(old: &Self::Data, new: &Self::Data) -> bool {
@@ -919,7 +919,7 @@ mod tests {
                 match n {
                     0 => 0,
                     1 => 1,
-                    n => get.get(Self(n - 1)) + get.get(Self(n - 2)),
+                    n => *get.get(Self(n - 1)) + get.get(Self(n - 2)),
                 }
             }
 
@@ -999,7 +999,7 @@ mod tests {
             }
         }
         fn sink(CapsuleHandle { mut get, .. }: CapsuleHandle) -> (u8, u8) {
-            (get.get(Cell(0)), get.get(Cell(1)))
+            (*get.get(Cell(0)), *get.get(Cell(1)))
         }
 
         let container = Container::new();
@@ -1031,24 +1031,24 @@ mod tests {
         }
 
         fn c(CapsuleHandle { mut get, .. }: CapsuleHandle) -> u8 {
-            get.get(b) + get.get(f)
+            *get.get(b) + get.get(f)
         }
 
         fn d(CapsuleHandle { mut get, .. }: CapsuleHandle) -> u8 {
-            get.get(c)
+            *get.get(c)
         }
 
         fn e(CapsuleHandle { mut get, .. }: CapsuleHandle) -> u8 {
-            get.get(a) + get.get(h)
+            *get.get(a) + get.get(h)
         }
 
         fn f(CapsuleHandle { mut get, register }: CapsuleHandle) -> u8 {
             register.register(());
-            get.get(e)
+            *get.get(e)
         }
 
         fn g(CapsuleHandle { mut get, .. }: CapsuleHandle) -> u8 {
-            get.get(c) + get.get(f)
+            *get.get(c) + get.get(f)
         }
 
         fn h(_: CapsuleHandle) -> u8 {
@@ -1122,8 +1122,8 @@ mod tests {
         fn batch_all_updates_action(
             CapsuleHandle { mut get, register }: CapsuleHandle,
         ) -> impl CData + Fn(u8) {
-            let ((_, set_state1), (_, set_state2)) = get.get(two_side_effects_capsule);
-            let (_, set_state3) = get.get(another_capsule);
+            let ((_, set_state1), (_, set_state2)) = get.get(two_side_effects_capsule).clone();
+            let (_, set_state3) = get.get(another_capsule).clone();
             let (_, _, run_txn) = register.raw(());
             move |n| {
                 let set_state1 = set_state1.clone();

@@ -16,9 +16,9 @@ fn crazy_capsule(_: CapsuleHandle) -> &'static str {
 fn big_string_factory(
     CapsuleHandle { mut get, .. }: CapsuleHandle,
 ) -> impl CData + Fn(&str) -> String {
-    let count = get.get(count_capsule);
-    let count_plus_one = get.get(count_plus_one_capsule);
-    let crazy = get.get(crazy_capsule);
+    let count = *get.get(count_capsule);
+    let count_plus_one = *get.get(count_plus_one_capsule);
+    let crazy = *get.get(crazy_capsule);
     move |other| {
         format!("param: {other}, count: {count}, count_plus_one: {count_plus_one}, crazy: {crazy}")
     }

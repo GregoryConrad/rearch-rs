@@ -9,7 +9,7 @@ impl Capsule for FibonacciCapsule {
         match n {
             0 => 0,
             1 => 1,
-            n => get.get(Self(n - 1)) + get.get(Self(n - 2)),
+            n => *get.get(Self(n - 1)) + get.get(Self(n - 2)),
         }
     }
 

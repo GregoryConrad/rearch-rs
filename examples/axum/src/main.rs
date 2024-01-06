@@ -57,7 +57,7 @@ mod todo_db {
     where
         F: FnOnce(ReadOnlyTable<'_, u128, &str>) -> Result<R, redb::Error>,
     {
-        let db = get.get(db_capsule);
+        let db = Arc::clone(get.get(db_capsule));
         move |with_table| {
             let txn = db.begin_read()?;
             let table = txn.open_table(TODOS_TABLE)?;
@@ -71,7 +71,7 @@ mod todo_db {
     where
         F: FnOnce(Table<'_, '_, u128, &str>) -> Result<R, redb::Error>,
     {
-        let db = get.get(db_capsule);
+        let db = Arc::clone(get.get(db_capsule));
         move |with_table| {
             let txn = db.begin_write()?;
             let table = txn.open_table(TODOS_TABLE)?;
@@ -84,7 +84,7 @@ mod todo_db {
     pub(super) fn read_todo_capsule(
         CapsuleHandle { mut get, .. }: CapsuleHandle,
     ) -> impl CData + Fn(Uuid) -> Result<Option<String>, redb::Error> {
-        let with_txn = get.get(with_read_txn_capsule);
+        let with_txn = get.get(with_read_txn_capsule).clone();
         move |uuid| {
             with_txn(move |table| {
                 let content = table.get(uuid.as_u128())?.map(|s| s.value().to_owned());
@@ -96,7 +96,7 @@ mod todo_db {
     pub(super) fn create_todo_capsule(
         CapsuleHandle { mut get, .. }: CapsuleHandle,
     ) -> impl CData + Fn(String) -> Result<TodoWithId, redb::Error> {
-        let with_txn = get.get(with_write_txn_capsule);
+        let with_txn = get.get(with_write_txn_capsule).clone();
         move |content| {
             with_txn(move |mut table| {
                 let uuid = Uuid::new_v4();
@@ -109,7 +109,7 @@ mod todo_db {
     pub(super) fn delete_todo_capsule(
         CapsuleHandle { mut get, .. }: CapsuleHandle,
     ) -> impl CData + Fn(Uuid) -> Result<Option<String>, redb::Error> {
-        let with_txn = get.get(with_write_txn_capsule);
+        let with_txn = get.get(with_write_txn_capsule).clone();
         move |uuid| {
             with_txn(move |mut table| {
                 let removed_todo = table.remove(uuid.as_u128())?.map(|s| s.value().to_owned());
@@ -121,7 +121,7 @@ mod todo_db {
     pub(super) fn list_todos_capsule(
         CapsuleHandle { mut get, .. }: CapsuleHandle,
     ) -> impl CData + Fn() -> Result<Vec<TodoWithId>, redb::Error> {
-        let with_txn = get.get(with_read_txn_capsule);
+        let with_txn = get.get(with_read_txn_capsule).clone();
         move || {
             with_txn(|table| {
                 table

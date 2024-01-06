@@ -21,20 +21,6 @@ impl<'scope, 'total> CapsuleReader<'scope, 'total> {
         Self(InternalCapsuleReader::Normal { id, txn })
     }
 
-    /// Returns a clone of the current data of the supplied capsule, initializing it if needed.
-    /// Internally forms a dependency graph amongst capsules, so feel free to conditionally invoke
-    /// this function in case you only conditionally need a capsule's data.
-    ///
-    /// # Panics
-    /// Panics when a capsule attempts to read itself in its first build,
-    /// or when a mocked [`CapsuleReader`] attempts to read a capsule's data that wasn't mocked.
-    pub fn get<C: Capsule>(&mut self, capsule: C) -> C::Data
-    where
-        C::Data: Clone,
-    {
-        self.as_ref(capsule).clone()
-    }
-
     /// Returns a ref to the current data of the supplied capsule, initializing it if needed.
     /// Internally forms a dependency graph amongst capsules, so feel free to conditionally invoke
     /// this function in case you only conditionally need a capsule's data.
@@ -42,7 +28,7 @@ impl<'scope, 'total> CapsuleReader<'scope, 'total> {
     /// # Panics
     /// Panics when a capsule attempts to read itself in its first build,
     /// or when a mocked [`CapsuleReader`] attempts to read a capsule's data that wasn't mocked.
-    pub fn as_ref<C: Capsule>(&mut self, capsule: C) -> &C::Data {
+    pub fn get<C: Capsule>(&mut self, capsule: C) -> &C::Data {
         match &mut self.0 {
             InternalCapsuleReader::Normal { ref id, txn } => {
                 let (this, other) = (id, capsule.id());
@@ -81,21 +67,15 @@ impl<'scope, 'total> CapsuleReader<'scope, 'total> {
 }
 
 #[cfg(feature = "experimental-api")]
-impl<A: Capsule> FnOnce<(A,)> for CapsuleReader<'_, '_>
-where
-    A::Data: Clone,
-{
-    type Output = A::Data;
+impl<A: Capsule> FnOnce<(A,)> for CapsuleReader<'_, '_> {
+    type Output = &A::Data;
     extern "rust-call" fn call_once(mut self, args: (A,)) -> Self::Output {
         self.call_mut(args)
     }
 }
 
 #[cfg(feature = "experimental-api")]
-impl<A: Capsule> FnMut<(A,)> for CapsuleReader<'_, '_>
-where
-    A::Data: Clone,
-{
+impl<A: Capsule> FnMut<(A,)> for CapsuleReader<'_, '_> {
     extern "rust-call" fn call_mut(&mut self, args: (A,)) -> Self::Output {
         self.get(args.0)
     }
@@ -146,8 +126,8 @@ mod tests {
     #[test]
     fn mock_capsule_reader_reads_capsules() {
         let mut get = create_mock_capsule_reader();
-        assert_eq!(get.get(foo_capsule), 123);
-        assert_eq!(get.as_ref(bar_capsule)(), 123);
+        assert_eq!(*get.get(foo_capsule), 123);
+        assert_eq!(get.get(bar_capsule)(), 123);
     }
 
     #[test]
