@@ -121,3 +121,38 @@ impl MockCapsuleReaderBuilder {
         CapsuleReader(InternalCapsuleReader::Mock { mocks: self.0 })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::{CapsuleHandle, CapsuleReader, MockCapsuleReaderBuilder};
+
+    fn foo_capsule(_: CapsuleHandle) -> u8 {
+        0
+    }
+    fn bar_capsule(_: CapsuleHandle) -> Box<dyn Send + Sync + Fn() -> u8> {
+        Box::new(|| 0)
+    }
+    fn another_capsule(_: CapsuleHandle) -> u8 {
+        0
+    }
+
+    fn create_mock_capsule_reader() -> CapsuleReader<'static, 'static> {
+        MockCapsuleReaderBuilder::new()
+            .set(&foo_capsule, 123)
+            .set(&bar_capsule, Box::new(|| 123))
+            .build()
+    }
+
+    #[test]
+    fn mock_capsule_reader_reads_capsules() {
+        let mut get = create_mock_capsule_reader();
+        assert_eq!(get.get(foo_capsule), 123);
+        assert_eq!(get.as_ref(bar_capsule)(), 123);
+    }
+
+    #[test]
+    #[should_panic]
+    fn mock_capsule_reader_panics_on_unmocked_capsule() {
+        create_mock_capsule_reader().get(another_capsule);
+    }
+}
