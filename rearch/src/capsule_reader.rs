@@ -21,20 +21,6 @@ impl<'scope, 'total> CapsuleReader<'scope, 'total> {
         Self(InternalCapsuleReader::Normal { id, txn })
     }
 
-    /// Returns a clone of the current data of the supplied capsule, initializing it if needed.
-    /// Internally forms a dependency graph amongst capsules, so feel free to conditionally invoke
-    /// this function in case you only conditionally need a capsule's data.
-    ///
-    /// # Panics
-    /// Panics when a capsule attempts to read itself in its first build,
-    /// or when a mocked [`CapsuleReader`] attempts to read a capsule's data that wasn't mocked.
-    pub fn get<C: Capsule>(&mut self, capsule: C) -> C::Data
-    where
-        C::Data: Clone,
-    {
-        self.as_ref(capsule).clone()
-    }
-
     /// Returns a ref to the current data of the supplied capsule, initializing it if needed.
     /// Internally forms a dependency graph amongst capsules, so feel free to conditionally invoke
     /// this function in case you only conditionally need a capsule's data.
@@ -97,7 +83,7 @@ where
     A::Data: Clone,
 {
     extern "rust-call" fn call_mut(&mut self, args: (A,)) -> Self::Output {
-        self.get(args.0)
+        self.as_ref(args.0).clone()
     }
 }
 
@@ -146,13 +132,13 @@ mod tests {
     #[test]
     fn mock_capsule_reader_reads_capsules() {
         let mut get = create_mock_capsule_reader();
-        assert_eq!(get.get(foo_capsule), 123);
+        assert_eq!(*get.as_ref(foo_capsule), 123);
         assert_eq!(get.as_ref(bar_capsule)(), 123);
     }
 
     #[test]
     #[should_panic]
     fn mock_capsule_reader_panics_on_unmocked_capsule() {
-        create_mock_capsule_reader().get(another_capsule);
+        create_mock_capsule_reader().as_ref(another_capsule);
     }
 }
