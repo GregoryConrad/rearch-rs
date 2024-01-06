@@ -95,7 +95,7 @@ Once `unboxed_closures` and `fn_traits` stabilize,
 this nightly syntax will be the preferred syntax,
 and this will no longer be feature-gated.
 (Without nightly, you must instead call the slightly more verbose
-`get.get(some_capsule)` and `register.register(effect())`.)
+`get.as_ref(some_capsule).clone()` and `register.register(effect())`.)
 
 
 ## Help Wanted!
