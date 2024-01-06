@@ -90,7 +90,7 @@ Also, there is some WIP [documentation] that will help you learn the core concep
 The MSRV is currently 1.74.0 and may change in any new ReArch version/release.
 
 It is also worth mentioning that the example shown in "In a Nutshell" above requires nightly
-for `unboxed_closures` and `fn_traits`, which is feature-gated under the `better-api` feature.
+for `unboxed_closures` and `fn_traits`, which is feature-gated under the `experimental-api` feature.
 Once `unboxed_closures` and `fn_traits` stabilize,
 this nightly syntax will be the preferred syntax,
 and this will no longer be feature-gated.

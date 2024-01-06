@@ -1,4 +1,4 @@
-#![cfg_attr(feature = "better-api", feature(unboxed_closures, fn_traits))]
+#![cfg_attr(feature = "experimental-api", feature(unboxed_closures, fn_traits))]
 
 use parking_lot::ReentrantMutex;
 use std::{
@@ -10,16 +10,20 @@ use std::{
 };
 
 mod capsule_key;
-pub use capsule_key::*;
+pub use capsule_key::CapsuleKey;
+pub(crate) use capsule_key::{CapsuleId, CreateCapsuleId};
 
 mod capsule_reader;
-pub use capsule_reader::*;
+pub use capsule_reader::{CapsuleReader, MockCapsuleReaderBuilder};
 
 mod side_effect_registrar;
-pub use side_effect_registrar::*;
+pub use side_effect_registrar::SideEffectRegistrar;
 
 mod txn;
-pub use txn::*;
+#[cfg(feature = "experimental-txn")]
+pub use txn::{ContainerReadTxn, ContainerWriteTxn};
+#[cfg(not(feature = "experimental-txn"))]
+use txn::{ContainerReadTxn, ContainerWriteTxn};
 
 /// Capsules are blueprints for creating some immutable data
 /// and do not actually contain any data themselves.
@@ -28,7 +32,9 @@ pub use txn::*;
 // - `'static` is required to store a copy of the capsule, and for TypeId::of()
 pub trait Capsule: Send + 'static {
     /// The type of data associated with this capsule, which must be `Send + Sync + 'static`.
-    /// Capsule data that implements `Clone` will also unlock a few convenience methods.
+    ///
+    /// [`Capsule::Data`] that implements `Clone` will also unlock a few convenience methods.
+    ///
     /// Note: when your types do implement `Clone`, it is suggested to be a "cheap" Clone.
     /// `Arc`s, small collections/data structures, and the `im` crate are great for this.
     // Associated type so that Capsule can only be implemented once for each concrete type
@@ -138,33 +144,6 @@ impl Container {
         Self::default()
     }
 
-    /// Runs the supplied callback with a `ContainerReadTxn` that allows you to read
-    /// the current data in the container.
-    ///
-    /// You almost never want to use this function directly!
-    /// Instead, use `read()` which wraps around `with_read_txn` and `with_write_txn`
-    /// and ensures a consistent read amongst all capsules without extra effort.
-    pub fn with_read_txn<R>(&self, to_run: impl FnOnce(&ContainerReadTxn) -> R) -> R {
-        self.0.with_read_txn(to_run)
-    }
-
-    /// Runs the supplied callback with a `ContainerWriteTxn` that allows you to read and populate
-    /// the current data in the container.
-    ///
-    /// You almost never want to use this function directly!
-    /// Instead, use `read()` which wraps around `with_read_txn` and `with_write_txn`
-    /// and ensures a consistent read amongst all capsules without extra effort.
-    ///
-    /// This method blocks other writers (readers always have unrestricted access).
-    ///
-    /// ABSOLUTELY DO NOT trigger any capsule side effects (i.e., rebuilds) in the callback!
-    /// This will result in a deadlock, and no future write transactions will be permitted.
-    /// You can always trigger a rebuild in a new thread or after the `ContainerWriteTxn` drops.
-    pub fn with_write_txn<R>(&self, to_run: impl FnOnce(&mut ContainerWriteTxn) -> R) -> R {
-        let orchestrator = SideEffectTxnOrchestrator(Arc::downgrade(&self.0));
-        self.0.with_write_txn(orchestrator, to_run)
-    }
-
     /// Performs a *consistent* read on all supplied capsules that have cloneable data.
     ///
     /// Consistency is important here: if you need the current data from a few different capsules,
@@ -235,15 +214,54 @@ impl Container {
         }
     }
 }
+impl Container {
+    /// Runs the supplied callback with a `ContainerReadTxn` that allows you to read
+    /// the current data in the container.
+    ///
+    /// You almost never want to use this function directly!
+    /// Instead, use `read()` which wraps around `with_read_txn` and `with_write_txn`
+    /// and ensures a consistent read amongst all capsules without extra effort.
+    #[cfg(not(feature = "experimental-txn"))]
+    fn with_read_txn<R>(&self, to_run: impl FnOnce(&ContainerReadTxn) -> R) -> R {
+        self.0.with_read_txn(to_run)
+    }
+    #[cfg(feature = "experimental-txn")]
+    pub fn with_read_txn<R>(&self, to_run: impl FnOnce(&ContainerReadTxn) -> R) -> R {
+        self.0.with_read_txn(to_run)
+    }
 
-/// Represents a handle onto a particular listener, as created with `Container::listen()`.
+    /// Runs the supplied callback with a `ContainerWriteTxn` that allows you to read and populate
+    /// the current data in the container.
+    ///
+    /// You almost never want to use this function directly!
+    /// Instead, use `read()` which wraps around `with_read_txn` and `with_write_txn`
+    /// and ensures a consistent read amongst all capsules without extra effort.
+    ///
+    /// This method blocks other writers (readers always have unrestricted access).
+    ///
+    /// ABSOLUTELY DO NOT trigger any capsule side effects (i.e., rebuilds) in the callback!
+    /// This will result in a deadlock, and no future write transactions will be permitted.
+    /// You can always trigger a rebuild in a new thread or after the `ContainerWriteTxn` drops.
+    #[cfg(not(feature = "experimental-txn"))]
+    fn with_write_txn<R>(&self, to_run: impl FnOnce(&mut ContainerWriteTxn) -> R) -> R {
+        let orchestrator = SideEffectTxnOrchestrator(Arc::downgrade(&self.0));
+        self.0.with_write_txn(orchestrator, to_run)
+    }
+    #[cfg(feature = "experimental-txn")]
+    pub fn with_write_txn<R>(&self, to_run: impl FnOnce(&mut ContainerWriteTxn) -> R) -> R {
+        let orchestrator = SideEffectTxnOrchestrator(Arc::downgrade(&self.0));
+        self.0.with_write_txn(orchestrator, to_run)
+    }
+}
+
+/// Represents a handle onto a particular listener, as created with [`Container::listen`].
 ///
 /// This struct doesn't do anything other than implement [`Drop`],
-/// and its [`Drop`] implementation will remove the listener from the Container.
+/// and its [`Drop`] implementation will remove the listener from the [`Container`].
 ///
-/// Thus, if you want the handle to live for as long as the Container itself,
+/// Thus, if you want the handle to live for as long as the [`Container`] itself,
 /// it is instead recommended to create a non-idempotent capsule
-/// (just call `register(as_listener());`)
+/// (just call `register(effects::as_listener());`)
 /// that acts as your listener. When you normally would call `container.listen()`,
 /// instead call `container.read(my_nonidempotent_listener)` to initialize it.
 pub struct ListenerHandle {
@@ -637,7 +655,7 @@ mod tests {
         assert_eq!(2, s2);
     }
 
-    #[cfg(feature = "better-api")]
+    #[cfg(feature = "experimental-api")]
     #[test]
     fn get_and_register() {
         fn rebuildable(CapsuleHandle { register, .. }: CapsuleHandle) -> impl CData + Fn() {
@@ -717,13 +735,10 @@ mod tests {
         let container = Container::new();
         let handle = {
             let states = states.clone();
-            container.listen(
-                || effects::is_first_build(),
-                move |mut get, is_first_build| {
-                    let _ = get.get(rebuildable);
-                    states.lock().unwrap().push(is_first_build);
-                },
-            )
+            container.listen(effects::is_first_build, move |mut get, is_first_build| {
+                let _ = get.get(rebuildable);
+                states.lock().unwrap().push(is_first_build);
+            })
         };
 
         container.read(rebuildable)();
@@ -732,6 +747,18 @@ mod tests {
         assert_eq!(*states, vec![true, false]);
 
         drop(handle);
+    }
+
+    #[test]
+    fn listener_with_multiple_effects() {
+        let container = Container::new();
+        _ = container.listen(
+            || (effects::is_first_build(), effects::is_first_build()),
+            |_, (b1, b2)| {
+                assert!(b1);
+                assert!(b2);
+            },
+        );
     }
 
     #[test]
