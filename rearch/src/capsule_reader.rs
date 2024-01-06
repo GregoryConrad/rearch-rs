@@ -80,7 +80,7 @@ impl<'scope, 'total> CapsuleReader<'scope, 'total> {
     }
 }
 
-#[cfg(feature = "better-api")]
+#[cfg(feature = "experimental-api")]
 impl<A: Capsule> FnOnce<(A,)> for CapsuleReader<'_, '_>
 where
     A::Data: Clone,
@@ -91,7 +91,7 @@ where
     }
 }
 
-#[cfg(feature = "better-api")]
+#[cfg(feature = "experimental-api")]
 impl<A: Capsule> FnMut<(A,)> for CapsuleReader<'_, '_>
 where
     A::Data: Clone,

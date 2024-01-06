@@ -28,5 +28,8 @@ default = []
 # Enable logging with `log`
 logging = ["dep:log"]
 
-# Enables the cleaner/better api, but unfortunately requires nightly
-better-api = []
+# *EXPERIMENTAL* Enables the cleaner/better api, but unfortunately requires nightly
+experimental-api = []
+
+# *EXPERIMENTAL* Enables ContainerReadTxn, ContainerWriteTxn, and associated methods
+experimental-txn = []

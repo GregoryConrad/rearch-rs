@@ -7,8 +7,6 @@ use crate::{
 /// Registers the given side effect and returns its build api.
 /// You can only call register once on purpose (it consumes self);
 /// to register multiple side effects, simply pass them in together!
-/// If you have an idempotent capsule that you wish to make non-idempotent,
-/// simply call `register()` with no arguments (or use the `as_listener()` side effect).
 pub struct SideEffectRegistrar<'a> {
     side_effect: &'a mut OnceCell<Box<dyn Any + Send>>,
     side_effect_state_mutater: SideEffectStateMutater,
@@ -73,7 +71,7 @@ impl<'a> SideEffectRegistrar<'a> {
 }
 
 // One arg register needs its own impl because tuples with one effect don't impl SideEffect
-#[cfg(feature = "better-api")]
+#[cfg(feature = "experimental-api")]
 impl<'a, S: SideEffect> FnOnce<(S,)> for SideEffectRegistrar<'a> {
     type Output = S::Api<'a>;
     extern "rust-call" fn call_once(self, (effect,): (S,)) -> Self::Output {
@@ -83,7 +81,7 @@ impl<'a, S: SideEffect> FnOnce<(S,)> for SideEffectRegistrar<'a> {
 macro_rules! generate_side_effect_registrar_fn_impl {
     ($($types:ident),*) => {
         #[allow(unused_parens, non_snake_case)]
-        #[cfg(feature = "better-api")]
+        #[cfg(feature = "experimental-api")]
         impl<'a, $($types: SideEffect),*> FnOnce<($($types,)*)> for SideEffectRegistrar<'a> {
             type Output = ($($types::Api<'a>),*);
             extern "rust-call" fn call_once(self, args: ($($types),*)) -> Self::Output {

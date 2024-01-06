@@ -8,10 +8,12 @@ use std::{
 use crate::Capsule;
 
 /// Represents a key for a capsule.
+/// The [`Default`] impl is for static capsules and the [`From`] impl is for dynamic capsules.
+///
 /// You'll only ever need to use this directly if you are making dynamic (runtime) capsules.
-/// Most applications are just fine with static/function capsules.
+/// Most applications are just fine with static (function) capsules.
 /// If you are making an incremental computation focused application,
-/// then you may need dynamic capsules.
+/// then you may need dynamic capsules and the [`From`] impl.
 #[derive(Default)]
 pub struct CapsuleKey(CapsuleKeyType);
 impl<T: Hash + Eq + Debug + Send + Sync + 'static> From<T> for CapsuleKey {
@@ -76,9 +78,8 @@ impl PartialEq for dyn DynamicCapsuleKey {
 }
 impl Eq for dyn DynamicCapsuleKey {}
 
-#[allow(clippy::redundant_pub_crate)] // false positive
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub(crate) struct CapsuleId {
+pub struct CapsuleId {
     // We need to have a copy of the capsule's type to include in the Hash + Eq
     // so that if two capsules of different types have the same bytes as their key,
     // they won't be kept under the same entry in the map.
@@ -86,8 +87,7 @@ pub(crate) struct CapsuleId {
     capsule_key: CapsuleKeyType,
 }
 
-#[allow(clippy::redundant_pub_crate)] // false positive
-pub(crate) trait CreateCapsuleId {
+pub trait CreateCapsuleId {
     fn id(&self) -> CapsuleId;
 }
 impl<C: Capsule> CreateCapsuleId for C {
