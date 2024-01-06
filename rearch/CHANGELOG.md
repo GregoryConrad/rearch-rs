@@ -1,6 +1,127 @@
 
 
+## v0.9.0 (2024-01-06)
+
+### Chore
+
+ - <csr-id-5ff6a4dcf9d0de3a5143f0c0ea584975558da99d/> update version numbers
+
+### Documentation
+
+ - <csr-id-0d3b93566082a5b0527d57de6ad84c3cf0db59eb/> update/improve code notes
+
+### Performance
+
+ - <csr-id-347cae5b131503a59faf0448120ea95aa5e2a7c2/> improve capsule id clone implementation
+
+### Test
+
+ - <csr-id-ff47495a9d26c8bff07a35056a8fd3d5faf34a02/> add MockCapsuleReaderBuilder tests
+
+### Refactor (BREAKING)
+
+ - <csr-id-4546e7e46008e257ec07b7c87894bf8aa8f90512/> remove `CapsuleReader::get`
+ - <csr-id-d38ac94beec839905edbf1432ecd6156bc003307/> rework internal modules, features, and code docs
+
+### Commit Statistics
+
+<csr-read-only-do-not-edit/>
+
+ - 6 commits contributed to the release over the course of 3 calendar days.
+ - 4 days passed between releases.
+ - 6 commits were understood as [conventional](https://www.conventionalcommits.org).
+ - 4 unique issues were worked on: [#25](https://github.com/GregoryConrad/rearch-rs/issues/25), [#26](https://github.com/GregoryConrad/rearch-rs/issues/26), [#27](https://github.com/GregoryConrad/rearch-rs/issues/27), [#29](https://github.com/GregoryConrad/rearch-rs/issues/29)
+
+### Commit Details
+
+<csr-read-only-do-not-edit/>
+
+<details><summary>view details</summary>
+
+ * **[#25](https://github.com/GregoryConrad/rearch-rs/issues/25)**
+    - Improve capsule id clone implementation ([`347cae5`](https://github.com/GregoryConrad/rearch-rs/commit/347cae5b131503a59faf0448120ea95aa5e2a7c2))
+ * **[#26](https://github.com/GregoryConrad/rearch-rs/issues/26)**
+    - Rework internal modules, features, and code docs ([`d38ac94`](https://github.com/GregoryConrad/rearch-rs/commit/d38ac94beec839905edbf1432ecd6156bc003307))
+ * **[#27](https://github.com/GregoryConrad/rearch-rs/issues/27)**
+    - Add MockCapsuleReaderBuilder tests ([`ff47495`](https://github.com/GregoryConrad/rearch-rs/commit/ff47495a9d26c8bff07a35056a8fd3d5faf34a02))
+ * **[#29](https://github.com/GregoryConrad/rearch-rs/issues/29)**
+    - Remove `CapsuleReader::get` ([`4546e7e`](https://github.com/GregoryConrad/rearch-rs/commit/4546e7e46008e257ec07b7c87894bf8aa8f90512))
+ * **Uncategorized**
+    - Update version numbers ([`5ff6a4d`](https://github.com/GregoryConrad/rearch-rs/commit/5ff6a4dcf9d0de3a5143f0c0ea584975558da99d))
+    - Update/improve code notes ([`0d3b935`](https://github.com/GregoryConrad/rearch-rs/commit/0d3b93566082a5b0527d57de6ad84c3cf0db59eb))
+</details>
+
+## v0.8.0 (2024-01-01)
+
+### Chore
+
+ - <csr-id-b81740f1787dd55c792b62dbf61295bcfbda6eba/> update version numbers
+
+### Refactor (BREAKING)
+
+ - <csr-id-ffda1036991653439cb71eb34bdae3cba710b065/> switch SideEffect to GAT lifetime
+
+### Commit Statistics
+
+<csr-read-only-do-not-edit/>
+
+ - 2 commits contributed to the release.
+ - 6 days passed between releases.
+ - 2 commits were understood as [conventional](https://www.conventionalcommits.org).
+ - 1 unique issue was worked on: [#22](https://github.com/GregoryConrad/rearch-rs/issues/22)
+
+### Commit Details
+
+<csr-read-only-do-not-edit/>
+
+<details><summary>view details</summary>
+
+ * **[#22](https://github.com/GregoryConrad/rearch-rs/issues/22)**
+    - Switch SideEffect to GAT lifetime ([`ffda103`](https://github.com/GregoryConrad/rearch-rs/commit/ffda1036991653439cb71eb34bdae3cba710b065))
+ * **Uncategorized**
+    - Update version numbers ([`b81740f`](https://github.com/GregoryConrad/rearch-rs/commit/b81740f1787dd55c792b62dbf61295bcfbda6eba))
+</details>
+
+## v0.7.0 (2023-12-26)
+
+### Chore
+
+ - <csr-id-7af305d2f6ee25a618f919ef7d179bfae4d7f6eb/> update version numbers
+
+### New Features (BREAKING)
+
+ - <csr-id-06bf0c8325d2f11c3e81c20f9e0ecff3ccfc31b3/> add side effect transactions
+
+### Refactor (BREAKING)
+
+ - <csr-id-d00c317c58da5bd9427333bb9527575d5049d62f/> move side effects to their own crate
+
+### Commit Statistics
+
+<csr-read-only-do-not-edit/>
+
+ - 3 commits contributed to the release.
+ - 10 days passed between releases.
+ - 3 commits were understood as [conventional](https://www.conventionalcommits.org).
+ - 2 unique issues were worked on: [#19](https://github.com/GregoryConrad/rearch-rs/issues/19), [#20](https://github.com/GregoryConrad/rearch-rs/issues/20)
+
+### Commit Details
+
+<csr-read-only-do-not-edit/>
+
+<details><summary>view details</summary>
+
+ * **[#19](https://github.com/GregoryConrad/rearch-rs/issues/19)**
+    - Add side effect transactions ([`06bf0c8`](https://github.com/GregoryConrad/rearch-rs/commit/06bf0c8325d2f11c3e81c20f9e0ecff3ccfc31b3))
+ * **[#20](https://github.com/GregoryConrad/rearch-rs/issues/20)**
+    - Move side effects to their own crate ([`d00c317`](https://github.com/GregoryConrad/rearch-rs/commit/d00c317c58da5bd9427333bb9527575d5049d62f))
+ * **Uncategorized**
+    - Update version numbers ([`7af305d`](https://github.com/GregoryConrad/rearch-rs/commit/7af305d2f6ee25a618f919ef7d179bfae4d7f6eb))
+</details>
+
 ## v0.6.0 (2023-12-15)
+
+<csr-id-109acfec83e4d74050200e98cfd9c6fee13e7e70/>
 
 ### Chore
 
@@ -14,7 +135,7 @@
 
 <csr-read-only-do-not-edit/>
 
- - 2 commits contributed to the release.
+ - 3 commits contributed to the release.
  - 2 commits were understood as [conventional](https://www.conventionalcommits.org).
  - 1 unique issue was worked on: [#15](https://github.com/GregoryConrad/rearch-rs/issues/15)
 
@@ -27,6 +148,7 @@
  * **[#15](https://github.com/GregoryConrad/rearch-rs/issues/15)**
     - Remove clone restriction on capsules ([`ec36bce`](https://github.com/GregoryConrad/rearch-rs/commit/ec36bcebf0be2d2081c52b58abdf4f415bb96dbb))
  * **Uncategorized**
+    - Release rearch v0.6.0, rearch-tokio v0.5.1 ([`2f191a5`](https://github.com/GregoryConrad/rearch-rs/commit/2f191a59538d75a18c872f7fdcd226e065ec34d5))
     - Version bumps ([`109acfe`](https://github.com/GregoryConrad/rearch-rs/commit/109acfec83e4d74050200e98cfd9c6fee13e7e70))
 </details>
 
