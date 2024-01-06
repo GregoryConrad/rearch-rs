@@ -568,7 +568,7 @@ mod tests {
         }
 
         fn count_plus_one(CapsuleHandle { mut get, .. }: CapsuleHandle) -> u8 {
-            get.get(count) + 1
+            get.as_ref(count) + 1
         }
 
         let container = Container::new();
@@ -597,7 +597,7 @@ mod tests {
         }
 
         fn dependent(CapsuleHandle { mut get, .. }: CapsuleHandle) -> u8 {
-            get.get(stateful).0 + 1
+            get.as_ref(stateful).0 + 1
         }
 
         #[test]
@@ -696,7 +696,7 @@ mod tests {
             let states = states.clone();
             move |mut reader: CapsuleReader, _| {
                 let mut states = states.lock().unwrap();
-                states.push(reader.get(stateful).0);
+                states.push(reader.as_ref(stateful).0);
             }
         };
 
@@ -736,7 +736,7 @@ mod tests {
         let handle = {
             let states = states.clone();
             container.listen(effects::is_first_build, move |mut get, is_first_build| {
-                let _ = get.get(rebuildable);
+                let _ = get.as_ref(rebuildable);
                 states.lock().unwrap().push(is_first_build);
             })
         };
@@ -792,7 +792,7 @@ mod tests {
 
             fn build(&self, CapsuleHandle { mut get, .. }: CapsuleHandle) -> Self::Data {
                 increment_build_count(Self);
-                _ = get.get(stateful);
+                _ = get.as_ref(stateful);
                 0
             }
 
@@ -807,7 +807,7 @@ mod tests {
 
             fn build(&self, CapsuleHandle { mut get, .. }: CapsuleHandle) -> Self::Data {
                 increment_build_count(Self);
-                get.get(UnchangingIdempotentDep)
+                *get.as_ref(UnchangingIdempotentDep)
             }
 
             fn eq(old: &Self::Data, new: &Self::Data) -> bool {
@@ -821,7 +821,7 @@ mod tests {
 
             fn build(&self, CapsuleHandle { mut get, .. }: CapsuleHandle) -> Self::Data {
                 increment_build_count(Self);
-                get.get(stateful).0
+                get.as_ref(stateful).0
             }
 
             fn eq(old: &Self::Data, new: &Self::Data) -> bool {
@@ -835,7 +835,7 @@ mod tests {
 
             fn build(&self, CapsuleHandle { mut get, .. }: CapsuleHandle) -> Self::Data {
                 increment_build_count(Self);
-                get.get(ChangingIdempotentDep)
+                *get.as_ref(ChangingIdempotentDep)
             }
 
             fn eq(old: &Self::Data, new: &Self::Data) -> bool {
@@ -845,8 +845,8 @@ mod tests {
 
         fn impure_sink(CapsuleHandle { mut get, register }: CapsuleHandle) {
             register.register(effects::as_listener());
-            _ = get.get(ChangingWatcher);
-            _ = get.get(UnchangingWatcher);
+            _ = get.as_ref(ChangingWatcher);
+            _ = get.as_ref(UnchangingWatcher);
         }
 
         let container = Container::new();
@@ -919,7 +919,7 @@ mod tests {
                 match n {
                     0 => 0,
                     1 => 1,
-                    n => get.get(Self(n - 1)) + get.get(Self(n - 2)),
+                    n => *get.as_ref(Self(n - 1)) + get.as_ref(Self(n - 2)),
                 }
             }
 
@@ -987,7 +987,7 @@ mod tests {
             type Data = u8;
 
             fn build(&self, CapsuleHandle { mut get, .. }: CapsuleHandle) -> Self::Data {
-                self.0 + get.get(stateful).0
+                self.0 + get.as_ref(stateful).0
             }
 
             fn eq(old: &Self::Data, new: &Self::Data) -> bool {
@@ -999,7 +999,7 @@ mod tests {
             }
         }
         fn sink(CapsuleHandle { mut get, .. }: CapsuleHandle) -> (u8, u8) {
-            (get.get(Cell(0)), get.get(Cell(1)))
+            (*get.as_ref(Cell(0)), *get.as_ref(Cell(1)))
         }
 
         let container = Container::new();
@@ -1022,33 +1022,33 @@ mod tests {
         }
 
         fn a(CapsuleHandle { mut get, .. }: CapsuleHandle) -> u8 {
-            get.get(stateful_a).0
+            get.as_ref(stateful_a).0
         }
 
         fn b(CapsuleHandle { mut get, register }: CapsuleHandle) -> u8 {
             register.register(());
-            get.get(a) + 1
+            get.as_ref(a) + 1
         }
 
         fn c(CapsuleHandle { mut get, .. }: CapsuleHandle) -> u8 {
-            get.get(b) + get.get(f)
+            *get.as_ref(b) + get.as_ref(f)
         }
 
         fn d(CapsuleHandle { mut get, .. }: CapsuleHandle) -> u8 {
-            get.get(c)
+            *get.as_ref(c)
         }
 
         fn e(CapsuleHandle { mut get, .. }: CapsuleHandle) -> u8 {
-            get.get(a) + get.get(h)
+            *get.as_ref(a) + get.as_ref(h)
         }
 
         fn f(CapsuleHandle { mut get, register }: CapsuleHandle) -> u8 {
             register.register(());
-            get.get(e)
+            *get.as_ref(e)
         }
 
         fn g(CapsuleHandle { mut get, .. }: CapsuleHandle) -> u8 {
-            get.get(c) + get.get(f)
+            *get.as_ref(c) + get.as_ref(f)
         }
 
         fn h(_: CapsuleHandle) -> u8 {
@@ -1122,8 +1122,8 @@ mod tests {
         fn batch_all_updates_action(
             CapsuleHandle { mut get, register }: CapsuleHandle,
         ) -> impl CData + Fn(u8) {
-            let ((_, set_state1), (_, set_state2)) = get.get(two_side_effects_capsule);
-            let (_, set_state3) = get.get(another_capsule);
+            let ((_, set_state1), (_, set_state2)) = get.as_ref(two_side_effects_capsule).clone();
+            let (_, set_state3) = get.as_ref(another_capsule).clone();
             let (_, _, run_txn) = register.raw(());
             move |n| {
                 let set_state1 = set_state1.clone();
@@ -1140,13 +1140,13 @@ mod tests {
         fn build_counter_capsule(CapsuleHandle { mut get, register }: CapsuleHandle) -> u8 {
             let is_first_build = register.register(effects::is_first_build());
 
-            _ = get.get(two_side_effects_capsule);
-            _ = get.get(another_capsule);
+            _ = get.as_ref(two_side_effects_capsule);
+            _ = get.as_ref(another_capsule);
 
             if is_first_build {
                 1
             } else {
-                get.get(build_counter_capsule) + 1
+                get.as_ref(build_counter_capsule) + 1
             }
         }
 
