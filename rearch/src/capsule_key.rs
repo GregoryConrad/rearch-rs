@@ -46,7 +46,7 @@ impl Clone for CapsuleKeyType {
 trait DynamicCapsuleKey: Debug + Send + Sync + 'static {
     fn as_any(&self) -> &dyn Any;
     fn dyn_hash(&self, state: &mut dyn Hasher);
-    fn dyn_eq(&self, other: &dyn Any) -> bool;
+    fn dyn_eq(&self, other: &dyn DynamicCapsuleKey) -> bool;
 }
 impl<T> DynamicCapsuleKey for T
 where
@@ -60,8 +60,9 @@ where
         self.hash(&mut state);
     }
 
-    fn dyn_eq(&self, other: &dyn Any) -> bool {
+    fn dyn_eq(&self, other: &dyn DynamicCapsuleKey) -> bool {
         other
+            .as_any()
             .downcast_ref::<T>()
             .map_or(false, |other| self == other)
     }
@@ -73,7 +74,7 @@ impl Hash for dyn DynamicCapsuleKey {
 }
 impl PartialEq for dyn DynamicCapsuleKey {
     fn eq(&self, other: &dyn DynamicCapsuleKey) -> bool {
-        self.dyn_eq(other.as_any())
+        self.dyn_eq(other)
     }
 }
 impl Eq for dyn DynamicCapsuleKey {}
