@@ -29,7 +29,7 @@ use txn::{ContainerReadTxn, ContainerWriteTxn};
 /// and do not actually contain any data themselves.
 /// See the documentation for more.
 // - `Send` is required because `CapsuleManager` needs to store a copy of the capsule
-// - `'static` is required to store a copy of the capsule, and for TypeId::of()
+// - `'static` is required to store a copy of the capsule, and for `TypeId::of()`
 pub trait Capsule: Send + 'static {
     /// The type of data associated with this capsule, which must be `Send + Sync + 'static`.
     ///
@@ -37,7 +37,6 @@ pub trait Capsule: Send + 'static {
     ///
     /// Note: when your types do implement `Clone`, it is suggested to be a "cheap" Clone.
     /// `Arc`s, small collections/data structures, and the `im` crate are great for this.
-    // Associated type so that Capsule can only be implemented once for each concrete type
     type Data: Send + Sync + 'static;
 
     /// Builds the capsule's immutable data using a given snapshot of the data flow graph.
@@ -95,6 +94,7 @@ pub struct CapsuleHandle<'txn_scope, 'txn_total, 'build> {
 }
 
 /// Represents a side effect that can be utilized within the build function.
+///
 /// The key observation about side effects is that they form a tree, where each side effect:
 /// - Has its own private state (including composing other side effects together)
 /// - Presents some api to the build method, probably including a way to rebuild & update its state
@@ -467,7 +467,7 @@ impl CapsuleManager {
         }
     }
 
-    // Builds a capsule's new data and puts it into the txn, returning true when the data changes.
+    /// Builds a capsule's new data and puts it into the txn, returning true when the data changes.
     fn build<C: Capsule>(id: CapsuleId, txn: &mut ContainerWriteTxn) -> bool {
         #[cfg(feature = "logging")]
         log::trace!("Building {} ({:?})", std::any::type_name::<C>(), id);
@@ -663,7 +663,7 @@ mod tests {
         }
 
         fn build_counter(CapsuleHandle { mut get, register }: CapsuleHandle) -> usize {
-            get(rebuildable); // mark dep
+            _ = get(rebuildable); // mark dep
 
             let is_first_build = register(effects::is_first_build());
             if is_first_build {
