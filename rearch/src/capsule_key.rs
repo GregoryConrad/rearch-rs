@@ -14,7 +14,7 @@ use crate::Capsule;
 /// Most applications are just fine with static (function) capsules.
 /// If you are making an incremental computation focused application,
 /// then you may need dynamic capsules and the [`From`] impl.
-#[derive(Default)]
+#[derive(Debug, Default, PartialEq, Eq)]
 pub struct CapsuleKey(CapsuleKeyType);
 impl<T: Hash + Eq + Debug + Send + Sync + 'static> From<T> for CapsuleKey {
     fn from(key: T) -> Self {
