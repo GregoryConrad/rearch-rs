@@ -16,4 +16,5 @@ readme.workspace = true
 workspace = true
 
 [dependencies]
+once_cell = { version = "1.19.0", default-features = false}
 rearch = { workspace = true }

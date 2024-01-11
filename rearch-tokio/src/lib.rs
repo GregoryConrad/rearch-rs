@@ -1,40 +1,23 @@
-use std::future::Future;
-
-use rearch::{SideEffect, SideEffectRegistrar};
+use rearch::{CData, SideEffect, SideEffectRegistrar};
 use rearch_effects as effects;
+use std::{future::Future, sync::Arc};
 
 struct FunctionalDrop<F: FnOnce()>(Option<F>);
 impl<F: FnOnce()> Drop for FunctionalDrop<F> {
     fn drop(&mut self) {
-        if let Some(callback) = std::mem::take(&mut self.0) {
+        if let Some(callback) = core::mem::take(&mut self.0) {
             callback();
         }
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum AsyncState<T> {
-    Idle(Option<T>),
     Loading(Option<T>),
     Complete(T),
 }
 
 impl<T> AsyncState<T> {
-    pub fn data(self) -> Option<T> {
-        match self {
-            Self::Idle(previous_data) | Self::Loading(previous_data) => previous_data,
-            Self::Complete(data) => Some(data),
-        }
-    }
-}
-
-#[derive(Clone)]
-pub enum AsyncPersistState<T> {
-    Loading(Option<T>),
-    Complete(T),
-}
-
-impl<T> AsyncPersistState<T> {
     pub fn data(self) -> Option<T> {
         match self {
             Self::Loading(previous_data) => previous_data,
@@ -44,6 +27,10 @@ impl<T> AsyncPersistState<T> {
 }
 
 /*
+TODO I think this should be modified to return `impl 'a + FnMut(F) -> AsyncState<T>`
+to remove the idle state
+Also might want to consider cancelation too--maybe the same function should return a cancel token
+
 #[must_use]
 pub fn future<T, F>(
 ) -> impl for<'a> SideEffect<Api<'a> = (impl Fn() -> AsyncState<T> + 'a, impl FnMut(F) + 'a)>
@@ -78,48 +65,70 @@ where
 }
 */
 
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum MutationState<T> {
+    Idle(Option<T>),
+    Loading(Option<T>),
+    Complete(T),
+}
+
+impl<T> MutationState<T> {
+    pub fn data(self) -> Option<T> {
+        match self {
+            Self::Idle(previous_data) | Self::Loading(previous_data) => previous_data,
+            Self::Complete(data) => Some(data),
+        }
+    }
+}
+
 #[must_use]
-pub fn mutation<T, F>() -> impl for<'a> SideEffect<
-    Api<'a> = (
-        AsyncState<T>,
-        impl Fn(F) + Clone + Send + Sync,
-        impl Fn() + Clone + Send + Sync,
-    ),
->
+pub fn mutation<T, F>(
+) -> impl for<'a> SideEffect<Api<'a> = (MutationState<T>, impl CData + Fn(F), impl CData + Fn())>
 where
     T: Clone + Send + 'static,
     F: Future<Output = T> + Send + 'static,
 {
     move |register: SideEffectRegistrar| {
-        let ((state, rebuild, _), (_, on_change)) = register.register((
-            effects::raw(AsyncState::Idle(None)),
+        let ((state, mutate_state, run_txn), (_, on_change)) = register.register((
+            effects::raw(MutationState::Idle(None)),
             // This immitates run_on_change, but for external use (outside of build)
             effects::state(FunctionalDrop(None)),
         ));
 
         let state = state.clone();
         let mutate = {
-            let rebuild = rebuild.clone();
+            let on_change = on_change.clone();
+            let mutate_state = mutate_state.clone();
+            let run_txn = Arc::clone(&run_txn);
             move |future| {
-                rebuild(Box::new(|state| {
-                    let old_state = std::mem::replace(state, AsyncState::Idle(None));
-                    *state = AsyncState::Loading(old_state.data());
-                }));
-
-                let rebuild = rebuild.clone();
-                let handle = tokio::spawn(async move {
-                    let data = future.await;
-                    rebuild(Box::new(move |state| {
-                        *state = AsyncState::Complete(data);
+                let on_change = on_change.clone();
+                let mutate_state = mutate_state.clone();
+                run_txn(Box::new(move || {
+                    mutate_state(Box::new(|state| {
+                        let old_state = std::mem::replace(state, MutationState::Idle(None));
+                        *state = MutationState::Loading(old_state.data());
                     }));
-                });
-                on_change(FunctionalDrop(Some(move || handle.abort())));
+
+                    let mutate_state = mutate_state.clone();
+                    let handle = tokio::spawn(async move {
+                        let data = future.await;
+                        mutate_state(Box::new(move |state| {
+                            *state = MutationState::Complete(data);
+                        }));
+                    });
+                    on_change(FunctionalDrop(Some(move || handle.abort())));
+                }));
             }
         };
         let clear = move || {
-            rebuild(Box::new(|state| {
-                let old_state = std::mem::replace(state, AsyncState::Idle(None));
-                *state = AsyncState::Idle(old_state.data());
+            let on_change = on_change.clone();
+            let mutate_state = mutate_state.clone();
+            run_txn(Box::new(move || {
+                mutate_state(Box::new(|state| {
+                    let old_state = std::mem::replace(state, MutationState::Idle(None));
+                    *state = MutationState::Idle(old_state.data());
+                }));
+                on_change(FunctionalDrop(None)); // abort old future if present
             }));
         };
         (state, mutate, clear)
@@ -127,6 +136,8 @@ where
 }
 
 /*
+TODO this should probably be reworked to be hydrate-like instead of state-like
+
 pub fn async_persist<T, R, Reader, Writer, ReadFuture, WriteFuture>(
     read: Reader,
     write: Writer,
