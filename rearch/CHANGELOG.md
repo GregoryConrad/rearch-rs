@@ -1,6 +1,52 @@
 
 
+## v0.9.1 (2024-01-11)
+
+### Chore
+
+ - <csr-id-151ff0b918e0b43bb9c78c42d380aee29717409c/> bump version numbers
+
+### Documentation
+
+ - <csr-id-74155c54b048e9200349c85d2f4a38313cc1c3f7/> update code comments
+
+### New Features
+
+ - <csr-id-b2e6e1dd19d34284fc4eb1ce145120c3a84edad9/> add Debug, PartialEq, and Eq impl for CapsuleKey
+
+### Refactor
+
+ - <csr-id-1b96f14e8e78526e49507fd433d2121ff447a6e6/> improve structure of dyn capsule key impl
+
+### Commit Statistics
+
+<csr-read-only-do-not-edit/>
+
+ - 4 commits contributed to the release over the course of 4 calendar days.
+ - 5 days passed between releases.
+ - 4 commits were understood as [conventional](https://www.conventionalcommits.org).
+ - 1 unique issue was worked on: [#32](https://github.com/GregoryConrad/rearch-rs/issues/32)
+
+### Commit Details
+
+<csr-read-only-do-not-edit/>
+
+<details><summary>view details</summary>
+
+ * **[#32](https://github.com/GregoryConrad/rearch-rs/issues/32)**
+    - Add Debug, PartialEq, and Eq impl for CapsuleKey ([`b2e6e1d`](https://github.com/GregoryConrad/rearch-rs/commit/b2e6e1dd19d34284fc4eb1ce145120c3a84edad9))
+ * **Uncategorized**
+    - Bump version numbers ([`151ff0b`](https://github.com/GregoryConrad/rearch-rs/commit/151ff0b918e0b43bb9c78c42d380aee29717409c))
+    - Improve structure of dyn capsule key impl ([`1b96f14`](https://github.com/GregoryConrad/rearch-rs/commit/1b96f14e8e78526e49507fd433d2121ff447a6e6))
+    - Update code comments ([`74155c5`](https://github.com/GregoryConrad/rearch-rs/commit/74155c54b048e9200349c85d2f4a38313cc1c3f7))
+</details>
+
 ## v0.9.0 (2024-01-06)
+
+<csr-id-5ff6a4dcf9d0de3a5143f0c0ea584975558da99d/>
+<csr-id-ff47495a9d26c8bff07a35056a8fd3d5faf34a02/>
+<csr-id-4546e7e46008e257ec07b7c87894bf8aa8f90512/>
+<csr-id-d38ac94beec839905edbf1432ecd6156bc003307/>
 
 ### Chore
 
@@ -27,7 +73,7 @@
 
 <csr-read-only-do-not-edit/>
 
- - 6 commits contributed to the release over the course of 3 calendar days.
+ - 7 commits contributed to the release over the course of 3 calendar days.
  - 4 days passed between releases.
  - 6 commits were understood as [conventional](https://www.conventionalcommits.org).
  - 4 unique issues were worked on: [#25](https://github.com/GregoryConrad/rearch-rs/issues/25), [#26](https://github.com/GregoryConrad/rearch-rs/issues/26), [#27](https://github.com/GregoryConrad/rearch-rs/issues/27), [#29](https://github.com/GregoryConrad/rearch-rs/issues/29)
@@ -47,11 +93,15 @@
  * **[#29](https://github.com/GregoryConrad/rearch-rs/issues/29)**
     - Remove `CapsuleReader::get` ([`4546e7e`](https://github.com/GregoryConrad/rearch-rs/commit/4546e7e46008e257ec07b7c87894bf8aa8f90512))
  * **Uncategorized**
+    - Release rearch v0.9.0, rearch-effects v0.2.1 ([`3e64f40`](https://github.com/GregoryConrad/rearch-rs/commit/3e64f40af45a64eacafc8098d66cc2498be12c5b))
     - Update version numbers ([`5ff6a4d`](https://github.com/GregoryConrad/rearch-rs/commit/5ff6a4dcf9d0de3a5143f0c0ea584975558da99d))
     - Update/improve code notes ([`0d3b935`](https://github.com/GregoryConrad/rearch-rs/commit/0d3b93566082a5b0527d57de6ad84c3cf0db59eb))
 </details>
 
 ## v0.8.0 (2024-01-01)
+
+<csr-id-b81740f1787dd55c792b62dbf61295bcfbda6eba/>
+<csr-id-ffda1036991653439cb71eb34bdae3cba710b065/>
 
 ### Chore
 
@@ -83,6 +133,9 @@
 </details>
 
 ## v0.7.0 (2023-12-26)
+
+<csr-id-7af305d2f6ee25a618f919ef7d179bfae4d7f6eb/>
+<csr-id-d00c317c58da5bd9427333bb9527575d5049d62f/>
 
 ### Chore
 
