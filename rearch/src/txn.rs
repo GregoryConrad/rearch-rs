@@ -23,7 +23,7 @@ impl ContainerReadTxn<'_> {
     where
         C::Data: Clone,
     {
-        self.try_read_ref(capsule).map(Clone::clone)
+        self.try_read_ref(capsule).cloned()
     }
 
     #[must_use]
@@ -81,7 +81,7 @@ impl ContainerWriteTxn<'_> {
     where
         C::Data: Clone,
     {
-        self.try_read_ref::<C>(capsule).map(Clone::clone)
+        self.try_read_ref::<C>(capsule).cloned()
     }
 
     #[must_use]
@@ -255,7 +255,7 @@ impl ContainerWriteTxn<'_> {
         // - True is for the second visit, which pushes node to the build order
         let mut to_visit_stack = start
             .iter()
-            .map(CapsuleId::clone)
+            .cloned()
             .map(|id| (false, id))
             .collect::<Vec<_>>();
         let mut visited = HashSet::new();
@@ -273,7 +273,7 @@ impl ContainerWriteTxn<'_> {
                     .dependents
                     .iter()
                     .filter(|dep| !visited.contains(*dep))
-                    .map(CapsuleId::clone)
+                    .cloned()
                     .for_each(|dep| to_visit_stack.push((false, dep)));
             }
         }
