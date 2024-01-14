@@ -83,19 +83,18 @@ impl<T> MutationState<T> {
 
 #[must_use]
 pub fn mutation<T, F>(
-) -> impl for<'a> SideEffect<Api<'a> = (MutationState<T>, impl CData + Fn(F), impl CData + Fn())>
+) -> impl for<'a> SideEffect<Api<'a> = (&'a MutationState<T>, impl CData + Fn(F), impl CData + Fn())>
 where
-    T: Clone + Send + 'static,
+    T: Send + 'static,
     F: Future<Output = T> + Send + 'static,
 {
-    move |register: SideEffectRegistrar| {
+    RefEffectLifetimeFixer2::new(move |register: SideEffectRegistrar| {
         let ((state, mutate_state, run_txn), (_, on_change)) = register.register((
             effects::raw(MutationState::Idle(None)),
             // This immitates run_on_change, but for external use (outside of build)
             effects::state(FunctionalDrop(None)),
         ));
 
-        let state = state.clone();
         let mutate = {
             let on_change = on_change.clone();
             let mutate_state = mutate_state.clone();
@@ -131,8 +130,8 @@ where
                 on_change(FunctionalDrop(None)); // abort old future if present
             }));
         };
-        (state, mutate, clear)
-    }
+        (&*state, mutate, clear)
+    })
 }
 
 /*
@@ -181,3 +180,23 @@ where
     }
 }
 */
+
+struct RefEffectLifetimeFixer2<F>(F);
+impl<T, F, R1, R2> SideEffect for RefEffectLifetimeFixer2<F>
+where
+    T: Send + 'static,
+    F: FnOnce(SideEffectRegistrar) -> (&T, R1, R2),
+{
+    type Api<'a> = (&'a T, R1, R2);
+    fn build(self, registrar: SideEffectRegistrar) -> Self::Api<'_> {
+        self.0(registrar)
+    }
+}
+impl<F> RefEffectLifetimeFixer2<F> {
+    const fn new<T, R1, R2>(f: F) -> Self
+    where
+        F: FnOnce(SideEffectRegistrar) -> (&T, R1, R2),
+    {
+        Self(f)
+    }
+}
