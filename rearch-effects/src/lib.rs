@@ -1,99 +1,55 @@
-use once_cell::unsync::Lazy;
 use rearch::{CData, SideEffect, SideEffectRegistrar};
 use std::sync::Arc;
 
-pub mod cloneable;
+mod state_transformers;
+pub use state_transformers::*;
 
-// This workaround was derived from:
-// https://github.com/GregoryConrad/rearch-rs/issues/3#issuecomment-1872869363
-// And is needed because of:
-// https://github.com/rust-lang/rust/issues/111662
+mod effect_lifetime_fixers;
 use effect_lifetime_fixers::{EffectLifetimeFixer0, EffectLifetimeFixer1, EffectLifetimeFixer2};
-mod effect_lifetime_fixers {
-    use rearch::{SideEffect, SideEffectRegistrar};
 
-    pub struct EffectLifetimeFixer0<F>(F);
-    impl<T, F> SideEffect for EffectLifetimeFixer0<F>
-    where
-        T: Send + 'static,
-        F: FnOnce(SideEffectRegistrar) -> &mut T,
-    {
-        type Api<'a> = &'a mut T;
-        fn build(self, registrar: SideEffectRegistrar) -> Self::Api<'_> {
-            self.0(registrar)
-        }
-    }
-    impl<F> EffectLifetimeFixer0<F> {
-        pub(super) const fn new<T>(f: F) -> Self
-        where
-            F: FnOnce(SideEffectRegistrar) -> &mut T,
-        {
-            Self(f)
-        }
-    }
+pub trait StateTransformer: Send + 'static {
+    type Input;
+    fn from_input(input: Self::Input) -> Self;
 
-    pub struct EffectLifetimeFixer1<F>(F);
-    impl<T, F, R1> SideEffect for EffectLifetimeFixer1<F>
-    where
-        T: Send + 'static,
-        F: FnOnce(SideEffectRegistrar) -> (&mut T, R1),
-    {
-        type Api<'a> = (&'a mut T, R1);
-        fn build(self, registrar: SideEffectRegistrar) -> Self::Api<'_> {
-            self.0(registrar)
-        }
-    }
-    impl<F> EffectLifetimeFixer1<F> {
-        pub(super) const fn new<T, R1>(f: F) -> Self
-        where
-            F: FnOnce(SideEffectRegistrar) -> (&mut T, R1),
-        {
-            Self(f)
-        }
-    }
+    type Inner;
+    fn as_inner(&mut self) -> &mut Self::Inner;
 
-    pub struct EffectLifetimeFixer2<F>(F);
-    impl<T, F, R1, R2> SideEffect for EffectLifetimeFixer2<F>
-    where
-        T: Send + 'static,
-        F: FnOnce(SideEffectRegistrar) -> (&mut T, R1, R2),
-    {
-        type Api<'a> = (&'a mut T, R1, R2);
-        fn build(self, registrar: SideEffectRegistrar) -> Self::Api<'_> {
-            self.0(registrar)
-        }
-    }
-    impl<F> EffectLifetimeFixer2<F> {
-        pub(super) const fn new<T, R1, R2>(f: F) -> Self
-        where
-            F: FnOnce(SideEffectRegistrar) -> (&mut T, R1, R2),
-        {
-            Self(f)
-        }
-    }
+    type Output<'a>;
+    fn as_output(&mut self) -> Self::Output<'_>;
 }
 
-pub fn raw<T: Send + 'static>(
-    initial: T,
-) -> impl for<'a> SideEffect<
-    Api<'a> = (
-        &'a mut T,
-        impl CData + Fn(Box<dyn FnOnce(&mut T)>),
-        Arc<dyn Send + Sync + Fn(Box<dyn FnOnce()>)>,
-    ),
-> {
-    EffectLifetimeFixer2::new(move |register: SideEffectRegistrar| register.raw(initial))
-}
+type SideEffectMutation<ST> = Box<dyn FnOnce(&mut <ST as StateTransformer>::Inner)>;
 
 // NOTE: returns (), the no-op side effect
 #[must_use]
 pub fn as_listener() -> impl for<'a> SideEffect<Api<'a> = ()> {}
 
-pub fn state<T: Send + 'static>(
-    initial: T,
-) -> impl for<'a> SideEffect<Api<'a> = (&'a mut T, impl CData + Fn(T))> {
-    EffectLifetimeFixer1::new(move |register: SideEffectRegistrar| {
-        let (state, rebuild, _) = register.raw(initial);
+pub fn raw<ST: StateTransformer>(
+    initial: ST::Input,
+) -> impl for<'a> SideEffect<
+    Api<'a> = (
+        ST::Output<'a>,
+        impl CData + Fn(Box<dyn FnOnce(&mut ST::Inner)>),
+        Arc<dyn Send + Sync + Fn(Box<dyn FnOnce()>)>,
+    ),
+> {
+    EffectLifetimeFixer2::<_, ST>::new(move |register: SideEffectRegistrar| {
+        let (transformer, run_mutation, run_txn) = register.raw(ST::from_input(initial));
+        (
+            transformer.as_output(),
+            move |mutation: SideEffectMutation<ST>| {
+                run_mutation(Box::new(move |st| mutation(st.as_inner())));
+            },
+            run_txn,
+        )
+    })
+}
+
+pub fn state<ST: StateTransformer>(
+    initial: ST::Input,
+) -> impl for<'a> SideEffect<Api<'a> = (ST::Output<'a>, impl CData + Fn(ST::Inner))> {
+    EffectLifetimeFixer1::<_, ST>::new(move |register: SideEffectRegistrar| {
+        let (state, rebuild, _) = register.register(raw::<ST>(initial));
         let set_state = move |new_state| {
             rebuild(Box::new(|state| *state = new_state));
         };
@@ -101,60 +57,37 @@ pub fn state<T: Send + 'static>(
     })
 }
 
-#[allow(clippy::missing_panics_doc)] // false positive
-pub fn lazy_state<T, F>(
-    init: F,
-) -> impl for<'a> SideEffect<Api<'a> = (&'a mut T, impl CData + Fn(T))>
-where
-    T: Send + 'static,
-    F: FnOnce() -> T + Send + 'static,
-{
-    EffectLifetimeFixer1::new(move |register: SideEffectRegistrar| {
-        let (cell, rebuild, _) = register.raw(Lazy::new(init));
-        let set_state = move |new_state| {
-            rebuild(Box::new(|cell| **cell = new_state));
-        };
-        (&mut **cell, set_state)
-    })
-}
-
-pub fn value<T: Send + 'static>(value: T) -> impl for<'a> SideEffect<Api<'a> = &'a mut T> {
-    EffectLifetimeFixer0::new(move |register: SideEffectRegistrar| register.raw(value).0)
-}
-
-#[allow(clippy::missing_panics_doc)] // false positive
-pub fn lazy_value<T, F>(init: F) -> impl for<'a> SideEffect<Api<'a> = &'a mut T>
-where
-    T: Send + 'static,
-    F: FnOnce() -> T + Send + 'static,
-{
-    EffectLifetimeFixer0::new(move |register: SideEffectRegistrar| {
-        let (cell, _, _) = register.raw(Lazy::new(init));
-        &mut **cell
+pub fn value<ST: StateTransformer>(
+    value: ST::Input,
+) -> impl for<'a> SideEffect<Api<'a> = ST::Output<'a>> {
+    EffectLifetimeFixer0::<_, ST>::new(move |register: SideEffectRegistrar| {
+        register.register(raw::<ST>(value)).0
     })
 }
 
 #[must_use]
 pub fn is_first_build() -> impl for<'a> SideEffect<Api<'a> = bool> {
     move |register: SideEffectRegistrar| {
-        let has_built_before = register.register(value(false));
+        let has_built_before = register.register(value::<MutRef<_>>(false));
         let is_first_build = !*has_built_before;
         *has_built_before = true;
         is_first_build
     }
 }
 
-pub fn reducer<State, Action, Reducer>(
+/// Models the state reducer pattern via side effects.
+///
+/// This should normally *not* be used with [`MutRef`].
+pub fn reducer<ST: StateTransformer, Action, Reducer>(
+    initial: ST::Input,
     reducer: Reducer,
-    initial: State,
-) -> impl for<'a> SideEffect<Api<'a> = (&'a mut State, impl CData + Fn(Action))>
+) -> impl for<'a> SideEffect<Api<'a> = (ST::Output<'a>, impl CData + Fn(Action))>
 where
-    State: Send + 'static,
     Action: 'static,
-    Reducer: Clone + Send + Sync + 'static + Fn(&State, Action) -> State,
+    Reducer: Clone + Send + Sync + 'static + Fn(&ST::Inner, Action) -> ST::Inner,
 {
-    EffectLifetimeFixer1::new(move |register: SideEffectRegistrar| {
-        let (state, update_state, _) = register.raw(initial);
+    EffectLifetimeFixer1::<_, ST>::new(move |register: SideEffectRegistrar| {
+        let (state, update_state, _) = register.register(raw::<ST>(initial));
         (state, move |action| {
             let reducer = reducer.clone();
             update_state(Box::new(move |state| *state = reducer(state, action)));
@@ -162,10 +95,8 @@ where
     })
 }
 
-// NOTE: Commented out because:
-// - This fails to compile due to a compiler bug (&'a mut R compiles fine, but &'a R doesn't)
-// - I think people should really be using a hydrate equivalent instead of this
-//   - A combo of lazy_value and run_on_change probably
+// NOTE: Commented out because I think people should really be using a hydrate equivalent
+// instead of this. Probably value::<LazyMutRef<_>>() and run_on_change?
 //
 // /// A thin wrapper around the state side effect that enables easy state persistence.
 // ///
@@ -237,3 +168,148 @@ impl<F: Send + FnOnce() + 'static> SideEffect for RunOnChange<F> {
     }
 }
 */
+
+#[cfg(test)]
+mod tests {
+    use crate::*;
+    use rearch::{CData, CapsuleHandle, Container};
+    use std::sync::atomic::{AtomicU8, Ordering};
+
+    #[allow(clippy::needless_pass_by_value)]
+    fn assert_type<Expected>(_actual: Expected) {}
+
+    #[test]
+    fn transformer_output_types() {
+        fn dummy_capsule(CapsuleHandle { register, .. }: CapsuleHandle) {
+            let ((r, _, _), (mr, _, _), (c, _, _)) = register.register((
+                raw::<Ref<u8>>(123),
+                raw::<MutRef<u8>>(123),
+                raw::<Cloned<u8>>(123),
+            ));
+            assert_type::<&u8>(r);
+            assert_type::<&mut u8>(mr);
+            assert_type::<u8>(c);
+        }
+        Container::new().read(dummy_capsule);
+    }
+
+    #[cfg(feature = "lazy-state-transformers")]
+    #[test]
+    fn lazy_transformer_output_types() {
+        fn dummy_capsule(CapsuleHandle { register, .. }: CapsuleHandle) {
+            let ((r, _, _), (mr, _, _), (c, _, _)) = register.register((
+                raw::<LazyRef<_>>(|| 123),
+                raw::<LazyMutRef<_>>(|| 123),
+                raw::<LazyCloned<_>>(|| 123),
+            ));
+            assert_type::<&u8>(r);
+            assert_type::<&mut u8>(mr);
+            assert_type::<u8>(c);
+        }
+        Container::new().read(dummy_capsule);
+    }
+
+    // NOTE: raw side effect is effectively tested via combination of the other side effects
+
+    #[test]
+    fn as_listener_gets_changes() {
+        static BUILD_COUNT: AtomicU8 = AtomicU8::new(0);
+
+        fn rebuildable_capsule(CapsuleHandle { register, .. }: CapsuleHandle) -> impl CData + Fn() {
+            let ((), rebuild, _) = register.raw(());
+            move || rebuild(Box::new(|()| {}))
+        }
+
+        fn listener_capsule(CapsuleHandle { mut get, register }: CapsuleHandle) {
+            register.register(as_listener());
+            BUILD_COUNT.fetch_add(1, Ordering::SeqCst);
+            get.as_ref(rebuildable_capsule);
+        }
+
+        let container = Container::new();
+        container.read(listener_capsule);
+        container.read(rebuildable_capsule)();
+        assert_eq!(BUILD_COUNT.fetch_add(1, Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn state_can_change() {
+        fn stateful_capsule(
+            CapsuleHandle { register, .. }: CapsuleHandle,
+        ) -> (u8, impl CData + Fn(u8)) {
+            register.register(state::<Cloned<_>>(0))
+        }
+
+        let container = Container::new();
+        assert_eq!(container.read(stateful_capsule).0, 0);
+        container.read(stateful_capsule).1(1);
+        assert_eq!(container.read(stateful_capsule).0, 1);
+    }
+
+    #[test]
+    fn value_can_change() {
+        fn rebuildable_capsule(CapsuleHandle { register, .. }: CapsuleHandle) -> impl CData + Fn() {
+            let ((), rebuild, _) = register.raw(());
+            move || rebuild(Box::new(|()| {}))
+        }
+
+        fn build_count_capsule(CapsuleHandle { mut get, register }: CapsuleHandle) -> u8 {
+            get.as_ref(rebuildable_capsule);
+            let build_count = register.register(value::<MutRef<_>>(0));
+            *build_count += 1;
+            *build_count
+        }
+
+        let container = Container::new();
+        assert_eq!(container.read(build_count_capsule), 1);
+        container.read(rebuildable_capsule)();
+        assert_eq!(container.read(build_count_capsule), 2);
+        container.read(rebuildable_capsule)();
+        assert_eq!(container.read(build_count_capsule), 3);
+    }
+
+    #[test]
+    fn is_first_build_changes_state() {
+        fn is_first_build_capsule(
+            CapsuleHandle { register, .. }: CapsuleHandle,
+        ) -> (bool, impl CData + Fn()) {
+            let (is_first_build, ((), rebuild, _)) =
+                register.register((is_first_build(), raw::<MutRef<_>>(())));
+            (is_first_build, move || rebuild(Box::new(|()| {})))
+        }
+
+        let container = Container::new();
+        assert!(container.read(is_first_build_capsule).0);
+        container.read(is_first_build_capsule).1();
+        assert!(!container.read(is_first_build_capsule).0);
+        container.read(is_first_build_capsule).1();
+        assert!(!container.read(is_first_build_capsule).0);
+    }
+
+    #[test]
+    fn reducer_can_change() {
+        enum CountAction {
+            Increment,
+            Decrement,
+        }
+
+        fn count_manager(
+            CapsuleHandle { register, .. }: CapsuleHandle,
+        ) -> (u8, impl CData + Fn(CountAction)) {
+            register.register(reducer::<Cloned<_>, _, _>(
+                0,
+                |state, action| match action {
+                    CountAction::Increment => state + 1,
+                    CountAction::Decrement => state - 1,
+                },
+            ))
+        }
+
+        let container = Container::new();
+        assert_eq!(container.read(count_manager).0, 0);
+        container.read(count_manager).1(CountAction::Increment);
+        assert_eq!(container.read(count_manager).0, 1);
+        container.read(count_manager).1(CountAction::Decrement);
+        assert_eq!(container.read(count_manager).0, 0);
+    }
+}

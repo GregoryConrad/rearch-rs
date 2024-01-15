@@ -1,3 +1,4 @@
+use effects::Cloned;
 use rearch::{CData, CapsuleHandle, Container};
 use rearch_effects as effects;
 
@@ -29,8 +30,7 @@ fn uses_factory_capsule(CapsuleHandle { mut get, .. }: CapsuleHandle) -> String 
 }
 
 fn stateful_capsule(CapsuleHandle { register, .. }: CapsuleHandle) -> (u32, impl CData + Fn(u32)) {
-    let (state, set_state) = register.register(effects::state(0));
-    (*state, set_state)
+    register.register(effects::state::<Cloned<_>>(0))
 }
 
 fn main() {

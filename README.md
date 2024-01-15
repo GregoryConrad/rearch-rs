@@ -38,7 +38,7 @@ Define your "capsules" (en-_capsulated_ pieces of state) at the top level:
 
 // This capsule provides the count and a way to increment that count.
 fn count_manager(CapsuleHandle { register, .. }: CapsuleHandle) -> (u8, impl CData + Fn()) {
-    let (count, set_count) = register(effects::cloneable::state(0));
+    let (count, set_count) = register(effects::state::<Cloned<_>>(0));
     let increment_count = move || set_count(count + 1);
     (count, increment_count)
 }
@@ -87,7 +87,8 @@ Also, there is some WIP [documentation] that will help you learn the core concep
 
 
 ## Minimum Supported Rust Version (MSRV)
-The MSRV is currently 1.74.0 and may change in any new ReArch version/release.
+The MSRV of `rearch` is currently 1.74.0 and may change in any new ReArch version/release.
+The MSRV of other crates in this repo will be the latest stable release for the foreseeable future.
 
 It is also worth mentioning that the example shown in "In a Nutshell" above requires nightly
 for `unboxed_closures` and `fn_traits`, which is feature-gated under the `experimental-api` feature.
