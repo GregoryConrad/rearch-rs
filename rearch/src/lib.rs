@@ -517,6 +517,7 @@ impl CapsuleManager {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use crate::*;
 
@@ -548,16 +549,16 @@ mod tests {
 
         pub fn rebuilder() -> impl for<'a> SideEffect<Api<'a> = impl CData + Fn()> {
             move |register: SideEffectRegistrar| {
-                let (_, rebuild, _) = register.raw(());
-                move || rebuild(Box::new(|_| {}))
+                let ((), rebuild, _) = register.raw(());
+                move || rebuild(Box::new(|()| {}))
             }
         }
     }
 
     #[test]
-    fn container_send_sync() {
-        fn assert_send_sync<T: Send + Sync>() {}
-        assert_send_sync::<crate::Container>()
+    const fn container_send_sync() {
+        const fn assert_send_sync<T: Send + Sync>() {}
+        assert_send_sync::<crate::Container>();
     }
 
     /// Check for some fundamental functionality with the classic count example
@@ -693,8 +694,8 @@ mod tests {
 
         let effect_factory = || ();
         let listener = {
-            let states = states.clone();
-            move |mut reader: CapsuleReader, _| {
+            let states = Arc::clone(&states);
+            move |mut reader: CapsuleReader, ()| {
                 let mut states = states.lock().unwrap();
                 states.push(reader.as_ref(stateful).0);
             }
@@ -720,6 +721,7 @@ mod tests {
 
         let states = states.lock().unwrap();
         assert_eq!(*states, vec![1, 2, 3, 5, 6, 7]);
+        drop(states);
     }
 
     #[test]
@@ -734,7 +736,7 @@ mod tests {
 
         let container = Container::new();
         let handle = {
-            let states = states.clone();
+            let states = Arc::clone(&states);
             container.listen(effects::is_first_build, move |mut get, is_first_build| {
                 let _ = get.as_ref(rebuildable);
                 states.lock().unwrap().push(is_first_build);
@@ -745,6 +747,7 @@ mod tests {
 
         let states = states.lock().unwrap();
         assert_eq!(*states, vec![true, false]);
+        drop(states);
 
         drop(handle);
     }
@@ -762,15 +765,21 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::too_many_lines, clippy::cognitive_complexity)]
     fn eq_check_skips_unneeded_rebuilds() {
         use std::{any::TypeId, collections::HashMap};
+
         static BUILDS: Mutex<OnceCell<HashMap<TypeId, u32>>> = Mutex::new(OnceCell::new());
+
+        #[allow(clippy::needless_pass_by_value)]
         fn increment_build_count<C: Capsule>(_capsule: C) {
             let mut cell = BUILDS.lock().unwrap();
             cell.get_or_init(HashMap::new);
             let entry = cell.get_mut().unwrap().entry(TypeId::of::<C>());
             *entry.or_default() += 1;
+            drop(cell);
         }
+        #[allow(clippy::needless_pass_by_value)]
         fn get_build_count<C: Capsule>(_capsule: C) -> u32 {
             *BUILDS
                 .lock()
@@ -781,68 +790,40 @@ mod tests {
                 .unwrap()
         }
 
+        macro_rules! define_cap {
+            ($CapsuleName:ident, $body:expr) => {
+                struct $CapsuleName;
+                impl Capsule for $CapsuleName {
+                    type Data = u32;
+                    fn build(&self, CapsuleHandle { get, .. }: CapsuleHandle) -> Self::Data {
+                        increment_build_count(Self);
+                        #[allow(clippy::redundant_closure_call)]
+                        $body(get)
+                    }
+                    fn eq(old: &Self::Data, new: &Self::Data) -> bool {
+                        old == new
+                    }
+                }
+            };
+        }
+
         fn stateful(CapsuleHandle { register, .. }: CapsuleHandle) -> (u32, impl CData + Fn(u32)) {
             increment_build_count(stateful);
             register.register(effects::cloned_state(0))
         }
-
-        struct UnchangingIdempotentDep;
-        impl Capsule for UnchangingIdempotentDep {
-            type Data = u32;
-
-            fn build(&self, CapsuleHandle { mut get, .. }: CapsuleHandle) -> Self::Data {
-                increment_build_count(Self);
-                _ = get.as_ref(stateful);
-                0
-            }
-
-            fn eq(old: &Self::Data, new: &Self::Data) -> bool {
-                old == new
-            }
-        }
-
-        struct UnchangingWatcher;
-        impl Capsule for UnchangingWatcher {
-            type Data = u32;
-
-            fn build(&self, CapsuleHandle { mut get, .. }: CapsuleHandle) -> Self::Data {
-                increment_build_count(Self);
-                *get.as_ref(UnchangingIdempotentDep)
-            }
-
-            fn eq(old: &Self::Data, new: &Self::Data) -> bool {
-                old == new
-            }
-        }
-
-        struct ChangingIdempotentDep;
-        impl Capsule for ChangingIdempotentDep {
-            type Data = u32;
-
-            fn build(&self, CapsuleHandle { mut get, .. }: CapsuleHandle) -> Self::Data {
-                increment_build_count(Self);
-                get.as_ref(stateful).0
-            }
-
-            fn eq(old: &Self::Data, new: &Self::Data) -> bool {
-                old == new
-            }
-        }
-
-        struct ChangingWatcher;
-        impl Capsule for ChangingWatcher {
-            type Data = u32;
-
-            fn build(&self, CapsuleHandle { mut get, .. }: CapsuleHandle) -> Self::Data {
-                increment_build_count(Self);
-                *get.as_ref(ChangingIdempotentDep)
-            }
-
-            fn eq(old: &Self::Data, new: &Self::Data) -> bool {
-                old == new
-            }
-        }
-
+        define_cap!(UnchangingIdempotentDep, |mut get: CapsuleReader| {
+            _ = get.as_ref(stateful);
+            0
+        });
+        define_cap!(UnchangingWatcher, |mut get: CapsuleReader| {
+            *get.as_ref(UnchangingIdempotentDep)
+        });
+        define_cap!(ChangingIdempotentDep, |mut get: CapsuleReader| {
+            get.as_ref(stateful).0
+        });
+        define_cap!(ChangingWatcher, |mut get: CapsuleReader| {
+            *get.as_ref(ChangingIdempotentDep)
+        });
         fn impure_sink(CapsuleHandle { mut get, register }: CapsuleHandle) {
             register.register(effects::as_listener());
             _ = get.as_ref(ChangingWatcher);
@@ -1124,7 +1105,7 @@ mod tests {
         ) -> impl CData + Fn(u8) {
             let ((_, set_state1), (_, set_state2)) = get.as_ref(two_side_effects_capsule).clone();
             let (_, set_state3) = get.as_ref(another_capsule).clone();
-            let (_, _, run_txn) = register.raw(());
+            let ((), _, run_txn) = register.raw(());
             move |n| {
                 let set_state1 = set_state1.clone();
                 let set_state2 = set_state2.clone();
