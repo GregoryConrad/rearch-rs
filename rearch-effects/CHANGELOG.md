@@ -5,7 +5,40 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.4.0 (2024-01-16)
+
+### Chore
+
+ - <csr-id-88585638e2790125a3c47941b1b6dedf77209603/> update version numbers
+
+### New Features (BREAKING)
+
+ - <csr-id-0f8e8643df4a521e142c64f8eab1dad0b36d06d7/> add side effect state transformers
+
+### Commit Statistics
+
+<csr-read-only-do-not-edit/>
+
+ - 2 commits contributed to the release.
+ - 4 days passed between releases.
+ - 2 commits were understood as [conventional](https://www.conventionalcommits.org).
+ - 1 unique issue was worked on: [#35](https://github.com/GregoryConrad/rearch-rs/issues/35)
+
+### Commit Details
+
+<csr-read-only-do-not-edit/>
+
+<details><summary>view details</summary>
+
+ * **[#35](https://github.com/GregoryConrad/rearch-rs/issues/35)**
+    - Add side effect state transformers ([`0f8e864`](https://github.com/GregoryConrad/rearch-rs/commit/0f8e8643df4a521e142c64f8eab1dad0b36d06d7))
+ * **Uncategorized**
+    - Update version numbers ([`8858563`](https://github.com/GregoryConrad/rearch-rs/commit/88585638e2790125a3c47941b1b6dedf77209603))
+</details>
+
 ## v0.3.0 (2024-01-11)
+
+<csr-id-151ff0b918e0b43bb9c78c42d380aee29717409c/>
 
 ### Chore
 
@@ -19,7 +52,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <csr-read-only-do-not-edit/>
 
- - 2 commits contributed to the release.
+ - 3 commits contributed to the release.
  - 5 days passed between releases.
  - 2 commits were understood as [conventional](https://www.conventionalcommits.org).
  - 1 unique issue was worked on: [#33](https://github.com/GregoryConrad/rearch-rs/issues/33)
@@ -33,6 +66,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
  * **[#33](https://github.com/GregoryConrad/rearch-rs/issues/33)**
     - Re-add and modernize older side effects ([`8603fc9`](https://github.com/GregoryConrad/rearch-rs/commit/8603fc98fad5d41684c3819b508dd67e844ffb63))
  * **Uncategorized**
+    - Release rearch v0.9.1, rearch-effects v0.3.0, rearch-tokio v0.8.0 ([`86c6afe`](https://github.com/GregoryConrad/rearch-rs/commit/86c6afe4f2958b611723e143a1928411b92a16f2))
     - Bump version numbers ([`151ff0b`](https://github.com/GregoryConrad/rearch-rs/commit/151ff0b918e0b43bb9c78c42d380aee29717409c))
 </details>
 

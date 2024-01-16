@@ -1,6 +1,39 @@
 
 
+## v0.9.2 (2024-01-16)
+
+### Chore
+
+ - <csr-id-88585638e2790125a3c47941b1b6dedf77209603/> update version numbers
+
+### Style
+
+ - <csr-id-0d2a659bc7cb5e28d8c4b41590e81ae8e3a59815/> resolve new clone-related nightly clippy lints
+
+### Commit Statistics
+
+<csr-read-only-do-not-edit/>
+
+ - 2 commits contributed to the release over the course of 3 calendar days.
+ - 4 days passed between releases.
+ - 2 commits were understood as [conventional](https://www.conventionalcommits.org).
+ - 0 issues like '(#ID)' were seen in commit messages
+
+### Commit Details
+
+<csr-read-only-do-not-edit/>
+
+<details><summary>view details</summary>
+
+ * **Uncategorized**
+    - Update version numbers ([`8858563`](https://github.com/GregoryConrad/rearch-rs/commit/88585638e2790125a3c47941b1b6dedf77209603))
+    - Resolve new clone-related nightly clippy lints ([`0d2a659`](https://github.com/GregoryConrad/rearch-rs/commit/0d2a659bc7cb5e28d8c4b41590e81ae8e3a59815))
+</details>
+
 ## v0.9.1 (2024-01-11)
+
+<csr-id-151ff0b918e0b43bb9c78c42d380aee29717409c/>
+<csr-id-1b96f14e8e78526e49507fd433d2121ff447a6e6/>
 
 ### Chore
 
@@ -22,7 +55,7 @@
 
 <csr-read-only-do-not-edit/>
 
- - 4 commits contributed to the release over the course of 4 calendar days.
+ - 5 commits contributed to the release over the course of 4 calendar days.
  - 5 days passed between releases.
  - 4 commits were understood as [conventional](https://www.conventionalcommits.org).
  - 1 unique issue was worked on: [#32](https://github.com/GregoryConrad/rearch-rs/issues/32)
@@ -36,6 +69,7 @@
  * **[#32](https://github.com/GregoryConrad/rearch-rs/issues/32)**
     - Add Debug, PartialEq, and Eq impl for CapsuleKey ([`b2e6e1d`](https://github.com/GregoryConrad/rearch-rs/commit/b2e6e1dd19d34284fc4eb1ce145120c3a84edad9))
  * **Uncategorized**
+    - Release rearch v0.9.1, rearch-effects v0.3.0, rearch-tokio v0.8.0 ([`86c6afe`](https://github.com/GregoryConrad/rearch-rs/commit/86c6afe4f2958b611723e143a1928411b92a16f2))
     - Bump version numbers ([`151ff0b`](https://github.com/GregoryConrad/rearch-rs/commit/151ff0b918e0b43bb9c78c42d380aee29717409c))
     - Improve structure of dyn capsule key impl ([`1b96f14`](https://github.com/GregoryConrad/rearch-rs/commit/1b96f14e8e78526e49507fd433d2121ff447a6e6))
     - Update code comments ([`74155c5`](https://github.com/GregoryConrad/rearch-rs/commit/74155c54b048e9200349c85d2f4a38313cc1c3f7))

@@ -1,6 +1,45 @@
 
 
+## v0.9.0 (2024-01-16)
+
+### Chore
+
+ - <csr-id-88585638e2790125a3c47941b1b6dedf77209603/> update version numbers
+
+### New Features (BREAKING)
+
+ - <csr-id-0f8e8643df4a521e142c64f8eab1dad0b36d06d7/> add side effect state transformers
+
+### Bug Fixes (BREAKING)
+
+ - <csr-id-f20f626e092d9afef6d2144d39ae846b8c9b0807/> change mutation return type to a ref
+
+### Commit Statistics
+
+<csr-read-only-do-not-edit/>
+
+ - 3 commits contributed to the release over the course of 1 calendar day.
+ - 4 days passed between releases.
+ - 3 commits were understood as [conventional](https://www.conventionalcommits.org).
+ - 2 unique issues were worked on: [#34](https://github.com/GregoryConrad/rearch-rs/issues/34), [#35](https://github.com/GregoryConrad/rearch-rs/issues/35)
+
+### Commit Details
+
+<csr-read-only-do-not-edit/>
+
+<details><summary>view details</summary>
+
+ * **[#34](https://github.com/GregoryConrad/rearch-rs/issues/34)**
+    - Change mutation return type to a ref ([`f20f626`](https://github.com/GregoryConrad/rearch-rs/commit/f20f626e092d9afef6d2144d39ae846b8c9b0807))
+ * **[#35](https://github.com/GregoryConrad/rearch-rs/issues/35)**
+    - Add side effect state transformers ([`0f8e864`](https://github.com/GregoryConrad/rearch-rs/commit/0f8e8643df4a521e142c64f8eab1dad0b36d06d7))
+ * **Uncategorized**
+    - Update version numbers ([`8858563`](https://github.com/GregoryConrad/rearch-rs/commit/88585638e2790125a3c47941b1b6dedf77209603))
+</details>
+
 ## v0.8.0 (2024-01-11)
+
+<csr-id-151ff0b918e0b43bb9c78c42d380aee29717409c/>
 
 ### Chore
 
@@ -14,7 +53,7 @@
 
 <csr-read-only-do-not-edit/>
 
- - 2 commits contributed to the release.
+ - 3 commits contributed to the release.
  - 10 days passed between releases.
  - 2 commits were understood as [conventional](https://www.conventionalcommits.org).
  - 1 unique issue was worked on: [#33](https://github.com/GregoryConrad/rearch-rs/issues/33)
@@ -28,37 +67,14 @@
  * **[#33](https://github.com/GregoryConrad/rearch-rs/issues/33)**
     - Re-add and modernize older side effects ([`8603fc9`](https://github.com/GregoryConrad/rearch-rs/commit/8603fc98fad5d41684c3819b508dd67e844ffb63))
  * **Uncategorized**
+    - Release rearch v0.9.1, rearch-effects v0.3.0, rearch-tokio v0.8.0 ([`86c6afe`](https://github.com/GregoryConrad/rearch-rs/commit/86c6afe4f2958b611723e143a1928411b92a16f2))
     - Bump version numbers ([`151ff0b`](https://github.com/GregoryConrad/rearch-rs/commit/151ff0b918e0b43bb9c78c42d380aee29717409c))
 </details>
 
-## v0.5.1 (2023-12-15)
-
-<csr-id-109acfec83e4d74050200e98cfd9c6fee13e7e70/>
-
-### Chore
-
- - <csr-id-109acfec83e4d74050200e98cfd9c6fee13e7e70/> version bumps
-
-### Commit Statistics
-
-<csr-read-only-do-not-edit/>
-
- - 2 commits contributed to the release.
- - 1 commit was understood as [conventional](https://www.conventionalcommits.org).
- - 0 issues like '(#ID)' were seen in commit messages
-
-### Commit Details
-
-<csr-read-only-do-not-edit/>
-
-<details><summary>view details</summary>
-
- * **Uncategorized**
-    - Release rearch v0.6.0, rearch-tokio v0.5.1 ([`2f191a5`](https://github.com/GregoryConrad/rearch-rs/commit/2f191a59538d75a18c872f7fdcd226e065ec34d5))
-    - Version bumps ([`109acfe`](https://github.com/GregoryConrad/rearch-rs/commit/109acfec83e4d74050200e98cfd9c6fee13e7e70))
-</details>
-
 ## v0.7.0 (2024-01-01)
+
+<csr-id-b81740f1787dd55c792b62dbf61295bcfbda6eba/>
+<csr-id-ffda1036991653439cb71eb34bdae3cba710b065/>
 
 ### Chore
 
@@ -90,6 +106,9 @@
 </details>
 
 ## v0.6.0 (2023-12-26)
+
+<csr-id-7af305d2f6ee25a618f919ef7d179bfae4d7f6eb/>
+<csr-id-d00c317c58da5bd9427333bb9527575d5049d62f/>
 
 ### Chore
 
@@ -124,6 +143,33 @@
     - Move side effects to their own crate ([`d00c317`](https://github.com/GregoryConrad/rearch-rs/commit/d00c317c58da5bd9427333bb9527575d5049d62f))
  * **Uncategorized**
     - Update version numbers ([`7af305d`](https://github.com/GregoryConrad/rearch-rs/commit/7af305d2f6ee25a618f919ef7d179bfae4d7f6eb))
+</details>
+
+## v0.5.1 (2023-12-15)
+
+<csr-id-109acfec83e4d74050200e98cfd9c6fee13e7e70/>
+
+### Chore
+
+ - <csr-id-109acfec83e4d74050200e98cfd9c6fee13e7e70/> version bumps
+
+### Commit Statistics
+
+<csr-read-only-do-not-edit/>
+
+ - 2 commits contributed to the release.
+ - 1 commit was understood as [conventional](https://www.conventionalcommits.org).
+ - 0 issues like '(#ID)' were seen in commit messages
+
+### Commit Details
+
+<csr-read-only-do-not-edit/>
+
+<details><summary>view details</summary>
+
+ * **Uncategorized**
+    - Release rearch v0.6.0, rearch-tokio v0.5.1 ([`2f191a5`](https://github.com/GregoryConrad/rearch-rs/commit/2f191a59538d75a18c872f7fdcd226e065ec34d5))
+    - Version bumps ([`109acfe`](https://github.com/GregoryConrad/rearch-rs/commit/109acfec83e4d74050200e98cfd9c6fee13e7e70))
 </details>
 
 ## v0.5.0 (2023-12-14)
