@@ -134,9 +134,11 @@ mod tests {
         let mut get = create_mock_capsule_reader();
         assert_eq!(*get.as_ref(foo_capsule), 123);
         assert_eq!(get.as_ref(bar_capsule)(), 123);
+        drop(get);
     }
 
     #[test]
+    #[allow(clippy::should_panic_without_expect)] // exact panic string is based on capsule TypeId
     #[should_panic]
     fn mock_capsule_reader_panics_on_unmocked_capsule() {
         create_mock_capsule_reader().as_ref(another_capsule);

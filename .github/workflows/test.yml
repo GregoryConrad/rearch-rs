@@ -30,9 +30,9 @@ jobs:
 
       - name: Code analysis (--no-default-features)
         run: cargo clippy --workspace --no-default-features -- -D warnings
-      - name: Code analysis (--all-features)
+      - name: Code analysis (--all-targets --all-features)
         if: matrix.toolchain == 'nightly' # experimental-api requires nightly
-        run: cargo clippy --workspace --all-features -- -D warnings
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
       - name: Run tests (--no-default-features)
         run: cargo test --workspace --no-default-features
