@@ -1,3 +1,4 @@
+use effects::{MutRef, StateTransformer};
 use rearch::{CData, SideEffect, SideEffectRegistrar};
 use rearch_effects as effects;
 use std::{future::Future, sync::Arc};
@@ -79,22 +80,70 @@ impl<T> MutationState<T> {
             Self::Complete(data) => Some(data),
         }
     }
+
+    pub fn map<U, F>(self, f: F) -> MutationState<U>
+    where
+        F: FnOnce(T) -> U,
+    {
+        match self {
+            Self::Idle(prev) => MutationState::Idle(prev.map(f)),
+            Self::Loading(prev) => MutationState::Loading(prev.map(f)),
+            Self::Complete(state) => MutationState::Complete(f(state)),
+        }
+    }
+
+    pub fn as_mut(&mut self) -> MutationState<&mut T> {
+        match *self {
+            Self::Idle(ref mut prev) => MutationState::Idle(prev.as_mut()),
+            Self::Loading(ref mut prev) => MutationState::Loading(prev.as_mut()),
+            Self::Complete(ref mut state) => MutationState::Complete(state),
+        }
+    }
 }
 
-#[must_use]
-pub fn mutation<T, F>(
-) -> impl for<'a> SideEffect<Api<'a> = (&'a MutationState<T>, impl CData + Fn(F), impl CData + Fn())>
+struct MutationLifetimeFixer<F, ST>(F, std::marker::PhantomData<ST>);
+impl<F, ST, R1, R2> SideEffect for MutationLifetimeFixer<F, ST>
 where
-    T: Send + 'static,
-    F: Future<Output = T> + Send + 'static,
+    F: FnOnce(SideEffectRegistrar) -> (MutationState<ST::Output<'_>>, R1, R2),
+    ST: StateTransformer,
 {
-    RefEffectLifetimeFixer2::new(move |register: SideEffectRegistrar| {
+    type Api<'a> = (MutationState<ST::Output<'a>>, R1, R2);
+    fn build(self, registrar: SideEffectRegistrar) -> Self::Api<'_> {
+        self.0(registrar)
+    }
+}
+impl<F, ST> MutationLifetimeFixer<F, ST> {
+    const fn new<R1, R2>(f: F) -> Self
+    where
+        F: FnOnce(SideEffectRegistrar) -> (MutationState<ST::Output<'_>>, R1, R2),
+        ST: StateTransformer,
+    {
+        Self(f, std::marker::PhantomData)
+    }
+}
+
+/// Allows you to trigger and cancel query mutations.
+///
+/// This should normally *not* be used with [`MutRef`].
+#[must_use]
+pub fn mutation<ST: StateTransformer, F>() -> impl for<'a> SideEffect<
+    Api<'a> = (
+        MutationState<ST::Output<'a>>,
+        impl CData + Fn(F),
+        impl CData + Fn(),
+    ),
+>
+where
+    F: Future<Output = ST::Input> + Send + 'static,
+{
+    MutationLifetimeFixer::<_, ST>::new(move |register: SideEffectRegistrar| {
         let ((state, mutate_state, run_txn), (_, on_change)) = register.register((
-            effects::raw(MutationState::Idle(None)),
+            effects::raw::<MutRef<MutationState<ST>>>(MutationState::Idle(None)),
             // This immitates run_on_change, but for external use (outside of build)
-            effects::state(FunctionalDrop(None)),
+            effects::state::<MutRef<_>>(FunctionalDrop(None)),
         ));
 
+        let state = state.as_mut().map(ST::as_output);
         let mutate = {
             let on_change = on_change.clone();
             let mutate_state = mutate_state.clone();
@@ -110,7 +159,7 @@ where
 
                     let mutate_state = mutate_state.clone();
                     let handle = tokio::spawn(async move {
-                        let data = future.await;
+                        let data = ST::from_input(future.await);
                         mutate_state(Box::new(move |state| {
                             *state = MutationState::Complete(data);
                         }));
@@ -130,7 +179,7 @@ where
                 on_change(FunctionalDrop(None)); // abort old future if present
             }));
         };
-        (&*state, mutate, clear)
+        (state, mutate, clear)
     })
 }
 
@@ -180,23 +229,3 @@ where
     }
 }
 */
-
-struct RefEffectLifetimeFixer2<F>(F);
-impl<T, F, R1, R2> SideEffect for RefEffectLifetimeFixer2<F>
-where
-    T: Send + 'static,
-    F: FnOnce(SideEffectRegistrar) -> (&T, R1, R2),
-{
-    type Api<'a> = (&'a T, R1, R2);
-    fn build(self, registrar: SideEffectRegistrar) -> Self::Api<'_> {
-        self.0(registrar)
-    }
-}
-impl<F> RefEffectLifetimeFixer2<F> {
-    const fn new<T, R1, R2>(f: F) -> Self
-    where
-        F: FnOnce(SideEffectRegistrar) -> (&T, R1, R2),
-    {
-        Self(f)
-    }
-}

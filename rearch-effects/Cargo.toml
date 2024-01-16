@@ -16,5 +16,11 @@ readme.workspace = true
 workspace = true
 
 [dependencies]
-once_cell = { version = "1.19.0", default-features = false}
+once_cell = { version = "1.19.0", default-features = false, optional = true}
 rearch = { workspace = true }
+
+[features]
+default = ["lazy-state-transformers"]
+
+# Enable the lazy state transformers via once_cell::unsync::Lazy
+lazy-state-transformers = ["dep:once_cell"]
