@@ -30,11 +30,16 @@ fn main() {
     );
 }
 
-#[test]
-fn fib_number_is_correct() {
-    let container = Container::new();
-    assert_eq!(
-        container.read(FibonacciCapsule(100)),
-        354_224_848_179_261_915_075
-    );
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fib_number_is_correct() {
+        let container = Container::new();
+        assert_eq!(
+            container.read(FibonacciCapsule(100)),
+            354_224_848_179_261_915_075
+        );
+    }
 }
