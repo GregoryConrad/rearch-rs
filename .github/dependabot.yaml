@@ -28,3 +28,7 @@ updates:
     directory: "/examples/simple-demo"
     schedule:
       interval: weekly
+  - package-ecosystem: cargo
+    directory: "/examples/large-list"
+    schedule:
+      interval: weekly
