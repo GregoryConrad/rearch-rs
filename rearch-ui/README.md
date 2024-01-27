@@ -1,7 +1,8 @@
 # rearch-ui
 
 Not sure how you found your way here, but this is just me fooling around with some prototype UI code
-for a (possible) future UI framework built around ReArch.
+for a (possible, although unlikely at the moment) future UI framework built around ReArch.
+I'd like to make it, but I frankly don't have the time nor expertise to build a full framework.
 
 See `lib.rs` for more:
 ```rust
@@ -39,6 +40,18 @@ fn sample_view(_: ViewHandle, _: ()) -> TerminatedView {
 Kinda cool, right?
 An entirely functional, declarative way to develop your UI applications.
 And macro free if you so choose!
+
+The even cooler part is that ReArch can be used as an IC engine
+for all view-diffing in said framework,
+_and very easily at that_.
+All that needs to be done is to make a "dynamic capsule"
+(each representing a node in the view tree) for each view,
+with each view node depending on its parent node from the view tree.
+A view can then directly supply its `SideEffectRegistrar` to the view when it is built,
+and whenever a rebuild is triggered all children will be automatically rebuilt too.
+The only change that is required to ReArch, as far as I can tell,
+is the addition of an `unsafe fn force_dispose<C: Capsule>(capsule: &Capsule)` in the `Container`
+to prevent leaks/invalid future state in the view tree nodes if the children in a collection change.
 
 `rearch-ui` would only supply a UI frontend to build apps with,
 leaving the heavy lifting of actually rendering/similar
