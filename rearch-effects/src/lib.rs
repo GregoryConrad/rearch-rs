@@ -172,7 +172,7 @@ impl<F: Send + FnOnce() + 'static> SideEffect for RunOnChange<F> {
 #[cfg(test)]
 mod tests {
     use crate::*;
-    use rearch::{CData, CapsuleHandle, Container};
+    use rearch::{CapsuleHandle, Container};
     use std::sync::atomic::{AtomicU8, Ordering};
 
     #[allow(clippy::needless_pass_by_value)]
