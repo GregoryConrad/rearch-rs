@@ -18,4 +18,4 @@ workspace = true
 [dependencies]
 rearch = { workspace = true }
 rearch-effects = { workspace = true }
-tokio = { version = "1.*", default-features = false, features = ["rt"] }
+tokio = { version = "1.36.0", default-features = false, features = ["rt"] }

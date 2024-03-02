@@ -17,10 +17,10 @@ workspace = true
 
 [dependencies]
 rearch-macros = { workspace = true }
-concread = { version = "0.4.*", default-features = false, features = ["maps"] }
-paste = "1.*"
-parking_lot = "0.12.*"
-log = { version = "0.4.*", optional = true }
+concread = { version = "0.4.0", default-features = false, features = ["maps"] }
+paste = "1.0.14"
+parking_lot = "0.12.1"
+log = { version = "0.4.21", optional = true }
 
 [features]
 default = []
