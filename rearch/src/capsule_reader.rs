@@ -5,7 +5,7 @@ use crate::{Capsule, CapsuleId, ContainerWriteTxn, CreateCapsuleId};
 /// Allows you to read the current data of capsules based on the given state of the container txn.
 pub struct CapsuleReader<'scope, 'total>(InternalCapsuleReader<'scope, 'total>);
 enum InternalCapsuleReader<'scope, 'total> {
-    /// For normal CapsuleReader operation
+    /// For normal [`CapsuleReader`] operation
     Normal {
         id: CapsuleId,
         txn: &'scope mut ContainerWriteTxn<'total>,
