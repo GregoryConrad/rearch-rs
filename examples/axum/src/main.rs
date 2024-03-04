@@ -1,4 +1,5 @@
-#![allow(clippy::unwrap_used, clippy::redundant_pub_crate)]
+#![allow(clippy::unwrap_used, clippy::redundant_pub_crate, clippy::multiple_crate_versions)]
+// TODO(GregoryConrad): remove multiple_crate_versions from allowlist once tokio deps are updated
 
 use axum::{
     extract::{Path, State},
