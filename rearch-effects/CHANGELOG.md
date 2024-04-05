@@ -5,7 +5,46 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.5.0 (2024-04-05)
+
+### Chore
+
+ - <csr-id-f9ab7a02192bf7555b26623081a85769d973a7ac/> bump version numbers
+
+### Style
+
+ - <csr-id-78eebcdd521a837d03427f52507691944155779c/> fix latest nightly clippy lint
+
+### New Features (BREAKING)
+
+ - <csr-id-0cca3369ce72c9ebbe5f5385dbe2e3e665fa2fd8/> add lifetimes to FnOnce callbacks
+   Helps to reduce some otherwise unneeded clones.
+
+### Commit Statistics
+
+<csr-read-only-do-not-edit/>
+
+ - 3 commits contributed to the release over the course of 45 calendar days.
+ - 80 days passed between releases.
+ - 3 commits were understood as [conventional](https://www.conventionalcommits.org).
+ - 1 unique issue was worked on: [#40](https://github.com/GregoryConrad/rearch-rs/issues/40)
+
+### Commit Details
+
+<csr-read-only-do-not-edit/>
+
+<details><summary>view details</summary>
+
+ * **[#40](https://github.com/GregoryConrad/rearch-rs/issues/40)**
+    - Add lifetimes to FnOnce callbacks ([`0cca336`](https://github.com/GregoryConrad/rearch-rs/commit/0cca3369ce72c9ebbe5f5385dbe2e3e665fa2fd8))
+ * **Uncategorized**
+    - Bump version numbers ([`f9ab7a0`](https://github.com/GregoryConrad/rearch-rs/commit/f9ab7a02192bf7555b26623081a85769d973a7ac))
+    - Fix latest nightly clippy lint ([`78eebcd`](https://github.com/GregoryConrad/rearch-rs/commit/78eebcdd521a837d03427f52507691944155779c))
+</details>
+
 ## v0.4.0 (2024-01-16)
+
+<csr-id-88585638e2790125a3c47941b1b6dedf77209603/>
 
 ### Chore
 
@@ -19,7 +58,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <csr-read-only-do-not-edit/>
 
- - 2 commits contributed to the release.
+ - 3 commits contributed to the release.
  - 4 days passed between releases.
  - 2 commits were understood as [conventional](https://www.conventionalcommits.org).
  - 1 unique issue was worked on: [#35](https://github.com/GregoryConrad/rearch-rs/issues/35)
@@ -33,6 +72,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
  * **[#35](https://github.com/GregoryConrad/rearch-rs/issues/35)**
     - Add side effect state transformers ([`0f8e864`](https://github.com/GregoryConrad/rearch-rs/commit/0f8e8643df4a521e142c64f8eab1dad0b36d06d7))
  * **Uncategorized**
+    - Release rearch v0.9.2, rearch-effects v0.4.0, rearch-tokio v0.9.0 ([`6fa2389`](https://github.com/GregoryConrad/rearch-rs/commit/6fa238941f6503c0a342e4ccc9ede7779b2c7d19))
     - Update version numbers ([`8858563`](https://github.com/GregoryConrad/rearch-rs/commit/88585638e2790125a3c47941b1b6dedf77209603))
 </details>
 

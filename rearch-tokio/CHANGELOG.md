@@ -1,6 +1,41 @@
 
 
+## v0.10.0 (2024-04-05)
+
+### Chore
+
+ - <csr-id-f9ab7a02192bf7555b26623081a85769d973a7ac/> bump version numbers
+
+### Style
+
+ - <csr-id-429990d91cb66797e5f678638ce5d22c2e12677f/> temporarily allow multiple crate versions
+ - <csr-id-f14098ac00541b4afc501fd0c11e58e695c85a45/> fix latest docs-styling clippy lint
+
+### Commit Statistics
+
+<csr-read-only-do-not-edit/>
+
+ - 3 commits contributed to the release over the course of 33 calendar days.
+ - 80 days passed between releases.
+ - 3 commits were understood as [conventional](https://www.conventionalcommits.org).
+ - 1 unique issue was worked on: [#37](https://github.com/GregoryConrad/rearch-rs/issues/37)
+
+### Commit Details
+
+<csr-read-only-do-not-edit/>
+
+<details><summary>view details</summary>
+
+ * **[#37](https://github.com/GregoryConrad/rearch-rs/issues/37)**
+    - Fix latest docs-styling clippy lint ([`f14098a`](https://github.com/GregoryConrad/rearch-rs/commit/f14098ac00541b4afc501fd0c11e58e695c85a45))
+ * **Uncategorized**
+    - Bump version numbers ([`f9ab7a0`](https://github.com/GregoryConrad/rearch-rs/commit/f9ab7a02192bf7555b26623081a85769d973a7ac))
+    - Temporarily allow multiple crate versions ([`429990d`](https://github.com/GregoryConrad/rearch-rs/commit/429990d91cb66797e5f678638ce5d22c2e12677f))
+</details>
+
 ## v0.9.0 (2024-01-16)
+
+<csr-id-88585638e2790125a3c47941b1b6dedf77209603/>
 
 ### Chore
 
@@ -18,7 +53,7 @@
 
 <csr-read-only-do-not-edit/>
 
- - 3 commits contributed to the release over the course of 1 calendar day.
+ - 4 commits contributed to the release over the course of 1 calendar day.
  - 4 days passed between releases.
  - 3 commits were understood as [conventional](https://www.conventionalcommits.org).
  - 2 unique issues were worked on: [#34](https://github.com/GregoryConrad/rearch-rs/issues/34), [#35](https://github.com/GregoryConrad/rearch-rs/issues/35)
@@ -34,6 +69,7 @@
  * **[#35](https://github.com/GregoryConrad/rearch-rs/issues/35)**
     - Add side effect state transformers ([`0f8e864`](https://github.com/GregoryConrad/rearch-rs/commit/0f8e8643df4a521e142c64f8eab1dad0b36d06d7))
  * **Uncategorized**
+    - Release rearch v0.9.2, rearch-effects v0.4.0, rearch-tokio v0.9.0 ([`6fa2389`](https://github.com/GregoryConrad/rearch-rs/commit/6fa238941f6503c0a342e4ccc9ede7779b2c7d19))
     - Update version numbers ([`8858563`](https://github.com/GregoryConrad/rearch-rs/commit/88585638e2790125a3c47941b1b6dedf77209603))
 </details>
 

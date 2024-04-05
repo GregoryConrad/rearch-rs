@@ -1,6 +1,60 @@
 
 
+## v0.10.0 (2024-04-05)
+
+### Chore
+
+ - <csr-id-f9ab7a02192bf7555b26623081a85769d973a7ac/> bump version numbers
+
+### Other
+
+ - <csr-id-6577780029d6e08d67219367fd5a1cc99cb8f3c4/> run clippy for tests too
+
+### Style
+
+ - <csr-id-f14098ac00541b4afc501fd0c11e58e695c85a45/> fix latest docs-styling clippy lint
+
+### New Features (BREAKING)
+
+ - <csr-id-0cca3369ce72c9ebbe5f5385dbe2e3e665fa2fd8/> add lifetimes to FnOnce callbacks
+   Helps to reduce some otherwise unneeded clones.
+
+### Refactor (BREAKING)
+
+ - <csr-id-92e9892d650b9368e12c35269de24e74b83848dc/> rewrite old CapsuleKey as trait alias
+   This removes issues the old CapsuleKey faced, such as no Hash impl.
+
+### Commit Statistics
+
+<csr-read-only-do-not-edit/>
+
+ - 5 commits contributed to the release over the course of 79 calendar days.
+ - 80 days passed between releases.
+ - 5 commits were understood as [conventional](https://www.conventionalcommits.org).
+ - 4 unique issues were worked on: [#36](https://github.com/GregoryConrad/rearch-rs/issues/36), [#37](https://github.com/GregoryConrad/rearch-rs/issues/37), [#40](https://github.com/GregoryConrad/rearch-rs/issues/40), [#41](https://github.com/GregoryConrad/rearch-rs/issues/41)
+
+### Commit Details
+
+<csr-read-only-do-not-edit/>
+
+<details><summary>view details</summary>
+
+ * **[#36](https://github.com/GregoryConrad/rearch-rs/issues/36)**
+    - Run clippy for tests too ([`6577780`](https://github.com/GregoryConrad/rearch-rs/commit/6577780029d6e08d67219367fd5a1cc99cb8f3c4))
+ * **[#37](https://github.com/GregoryConrad/rearch-rs/issues/37)**
+    - Fix latest docs-styling clippy lint ([`f14098a`](https://github.com/GregoryConrad/rearch-rs/commit/f14098ac00541b4afc501fd0c11e58e695c85a45))
+ * **[#40](https://github.com/GregoryConrad/rearch-rs/issues/40)**
+    - Add lifetimes to FnOnce callbacks ([`0cca336`](https://github.com/GregoryConrad/rearch-rs/commit/0cca3369ce72c9ebbe5f5385dbe2e3e665fa2fd8))
+ * **[#41](https://github.com/GregoryConrad/rearch-rs/issues/41)**
+    - Rewrite old CapsuleKey as trait alias ([`92e9892`](https://github.com/GregoryConrad/rearch-rs/commit/92e9892d650b9368e12c35269de24e74b83848dc))
+ * **Uncategorized**
+    - Bump version numbers ([`f9ab7a0`](https://github.com/GregoryConrad/rearch-rs/commit/f9ab7a02192bf7555b26623081a85769d973a7ac))
+</details>
+
 ## v0.9.2 (2024-01-16)
+
+<csr-id-88585638e2790125a3c47941b1b6dedf77209603/>
+<csr-id-0d2a659bc7cb5e28d8c4b41590e81ae8e3a59815/>
 
 ### Chore
 
@@ -14,7 +68,7 @@
 
 <csr-read-only-do-not-edit/>
 
- - 2 commits contributed to the release over the course of 3 calendar days.
+ - 3 commits contributed to the release over the course of 3 calendar days.
  - 4 days passed between releases.
  - 2 commits were understood as [conventional](https://www.conventionalcommits.org).
  - 0 issues like '(#ID)' were seen in commit messages
@@ -26,6 +80,7 @@
 <details><summary>view details</summary>
 
  * **Uncategorized**
+    - Release rearch v0.9.2, rearch-effects v0.4.0, rearch-tokio v0.9.0 ([`6fa2389`](https://github.com/GregoryConrad/rearch-rs/commit/6fa238941f6503c0a342e4ccc9ede7779b2c7d19))
     - Update version numbers ([`8858563`](https://github.com/GregoryConrad/rearch-rs/commit/88585638e2790125a3c47941b1b6dedf77209603))
     - Resolve new clone-related nightly clippy lints ([`0d2a659`](https://github.com/GregoryConrad/rearch-rs/commit/0d2a659bc7cb5e28d8c4b41590e81ae8e3a59815))
 </details>
