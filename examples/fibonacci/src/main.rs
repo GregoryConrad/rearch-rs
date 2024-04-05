@@ -17,8 +17,8 @@ impl Capsule for FibonacciCapsule {
         old == new
     }
 
-    fn key(&self) -> CapsuleKey {
-        self.0.into()
+    fn key(&self) -> impl CapsuleKey {
+        self.0
     }
 }
 

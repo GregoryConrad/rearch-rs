@@ -56,10 +56,9 @@ pub trait Capsule: Send + 'static {
     /// which is for static capsules.
     /// If you specifically need dynamic capsules,
     /// such as for an incremental computation focused application,
-    /// you will need to implement this function.
-    /// See [`CapsuleKey`] for more.
-    fn key(&self) -> CapsuleKey {
-        CapsuleKey::default()
+    /// you will need to implement this function and return your capsule's key.
+    fn key(&self) -> impl CapsuleKey {
+        // NOTE: this default impl implicitly returns `()` (for static capsules)
     }
 }
 impl<T, F> Capsule for F
@@ -912,8 +911,8 @@ mod tests {
                 old == new
             }
 
-            fn key(&self) -> CapsuleKey {
-                self.0.into()
+            fn key(&self) -> impl CapsuleKey {
+                self.0
             }
         }
 
@@ -935,8 +934,8 @@ mod tests {
                 old == new
             }
 
-            fn key(&self) -> CapsuleKey {
-                self.0.into()
+            fn key(&self) -> impl CapsuleKey {
+                self.0
             }
         }
         struct B(u8);
@@ -951,8 +950,8 @@ mod tests {
                 old == new
             }
 
-            fn key(&self) -> CapsuleKey {
-                self.0.into()
+            fn key(&self) -> impl CapsuleKey {
+                self.0
             }
         }
 
@@ -979,8 +978,8 @@ mod tests {
                 old == new
             }
 
-            fn key(&self) -> CapsuleKey {
-                self.0.into()
+            fn key(&self) -> impl CapsuleKey {
+                self.0
             }
         }
         fn sink(CapsuleHandle { mut get, .. }: CapsuleHandle) -> (u8, u8) {

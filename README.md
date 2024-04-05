@@ -87,7 +87,7 @@ Also, there is some WIP [documentation] that will help you learn the core concep
 
 
 ## Minimum Supported Rust Version (MSRV)
-The MSRV of `rearch` is currently 1.74.0 and may change in any new ReArch version/release.
+The MSRV of `rearch` is currently 1.75.0 and may change in any new ReArch version/release.
 The MSRV of other crates in this repo will be the latest stable release for the foreseeable future.
 
 It is also worth mentioning that the example shown in "In a Nutshell" above requires nightly
