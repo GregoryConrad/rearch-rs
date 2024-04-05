@@ -7,48 +7,16 @@ use std::{
 
 use crate::Capsule;
 
-/// Represents a key for a capsule.
-/// The [`Default`] impl is for static capsules and the [`From`] impl is for dynamic capsules.
-///
-/// You'll only ever need to use this directly if you are making dynamic (runtime) capsules.
-/// Most applications are just fine with static (function) capsules.
-/// If you are making an incremental computation focused application,
-/// then you may need dynamic capsules and the [`From`] impl.
-#[derive(Debug, Default, PartialEq, Eq)]
-pub struct CapsuleKey(CapsuleKeyType);
-impl<T: Hash + Eq + Debug + Send + Sync + 'static> From<T> for CapsuleKey {
-    fn from(key: T) -> Self {
-        Self(CapsuleKeyType::Dynamic(Arc::new(key)))
-    }
-}
+/// Represents a static or dynamic capsule key. See [`Capsule::key`].
+pub trait CapsuleKey: Hash + Eq + Debug + Send + Sync + 'static {}
+impl<T: Hash + Eq + Debug + Send + Sync + 'static> CapsuleKey for T {}
 
-// PartialEq fails to derive because of the Box<dyn Trait>, see here for the below workaround:
-// https://github.com/rust-lang/rust/issues/78808#issuecomment-1664416547
-#[derive(Debug, Default, PartialEq, Eq, Hash)]
-enum CapsuleKeyType<DynDynamicCapsuleKey: ?Sized = dyn DynamicCapsuleKey> {
-    /// A static capsule that is identified by its [`TypeId`].
-    #[default]
-    Static,
-    /// A dynamic capsule, whose key is some hash-able data.
-    Dynamic(Arc<DynDynamicCapsuleKey>),
-}
-// NOTE: we need a manual clone impl since the PartialEq derive workaround above
-// messes up the Clone derive.
-impl Clone for CapsuleKeyType {
-    fn clone(&self) -> Self {
-        match self {
-            CapsuleKeyType::Static => CapsuleKeyType::Static,
-            CapsuleKeyType::Dynamic(arc) => CapsuleKeyType::Dynamic(Arc::clone(arc)),
-        }
-    }
-}
-
-trait DynamicCapsuleKey: Debug + Send + Sync + 'static {
+trait DynCapsuleKey: Debug + Send + Sync + 'static {
     fn as_any(&self) -> &dyn Any;
     fn dyn_hash(&self, state: &mut dyn Hasher);
-    fn dyn_eq(&self, other: &dyn DynamicCapsuleKey) -> bool;
+    fn dyn_eq(&self, other: &dyn DynCapsuleKey) -> bool;
 }
-impl<T> DynamicCapsuleKey for T
+impl<T> DynCapsuleKey for T
 where
     T: Hash + Eq + Debug + Send + Sync + 'static,
 {
@@ -60,32 +28,35 @@ where
         self.hash(&mut state);
     }
 
-    fn dyn_eq(&self, other: &dyn DynamicCapsuleKey) -> bool {
+    fn dyn_eq(&self, other: &dyn DynCapsuleKey) -> bool {
         other
             .as_any()
             .downcast_ref::<T>()
             .map_or(false, |other| self == other)
     }
 }
-impl Hash for dyn DynamicCapsuleKey {
+impl Hash for dyn DynCapsuleKey {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.dyn_hash(state);
     }
 }
-impl PartialEq for dyn DynamicCapsuleKey {
-    fn eq(&self, other: &dyn DynamicCapsuleKey) -> bool {
+impl PartialEq for dyn DynCapsuleKey {
+    fn eq(&self, other: &dyn DynCapsuleKey) -> bool {
         self.dyn_eq(other)
     }
 }
-impl Eq for dyn DynamicCapsuleKey {}
+impl Eq for dyn DynCapsuleKey {}
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct CapsuleId {
-    // We need to have a copy of the capsule's type to include in the Hash + Eq
-    // so that if two capsules of different types have the same bytes as their key,
+    // NOTE: we need to have a copy of the capsule's type to include in the Hash + Eq
+    // so that if two capsules of different types have the same key,
     // they won't be kept under the same entry in the map.
     capsule_type: TypeId,
-    capsule_key: CapsuleKeyType,
+    // NOTE: capsule_key is Arc<Box<_>> instead of just Arc<_> because of this:
+    // https://github.com/rust-lang/rust/issues/78808#issuecomment-1664012270
+    // Hand-rolling a PartialEq + Hash sucks and I'd probably screw it up.
+    capsule_key: Arc<Box<dyn DynCapsuleKey>>,
 }
 
 pub trait CreateCapsuleId {
@@ -95,7 +66,7 @@ impl<C: Capsule> CreateCapsuleId for C {
     fn id(&self) -> CapsuleId {
         CapsuleId {
             capsule_type: TypeId::of::<C>(),
-            capsule_key: self.key().0,
+            capsule_key: Arc::new(Box::new(self.key())),
         }
     }
 }
