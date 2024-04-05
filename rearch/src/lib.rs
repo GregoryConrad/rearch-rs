@@ -222,11 +222,11 @@ impl Container {
     /// Instead, use `read()` which wraps around `with_read_txn` and `with_write_txn`
     /// and ensures a consistent read amongst all capsules without extra effort.
     #[cfg(not(feature = "experimental-txn"))]
-    fn with_read_txn<R>(&self, to_run: impl FnOnce(&ContainerReadTxn) -> R) -> R {
+    fn with_read_txn<'f, R>(&self, to_run: impl 'f + FnOnce(&ContainerReadTxn) -> R) -> R {
         self.0.with_read_txn(to_run)
     }
     #[cfg(feature = "experimental-txn")]
-    pub fn with_read_txn<R>(&self, to_run: impl FnOnce(&ContainerReadTxn) -> R) -> R {
+    pub fn with_read_txn<'f, R>(&self, to_run: impl 'f + FnOnce(&ContainerReadTxn) -> R) -> R {
         self.0.with_read_txn(to_run)
     }
 
@@ -243,12 +243,15 @@ impl Container {
     /// This will result in a deadlock, and no future write transactions will be permitted.
     /// You can always trigger a rebuild in a new thread or after the `ContainerWriteTxn` drops.
     #[cfg(not(feature = "experimental-txn"))]
-    fn with_write_txn<R>(&self, to_run: impl FnOnce(&mut ContainerWriteTxn) -> R) -> R {
+    fn with_write_txn<'f, R>(&self, to_run: impl 'f + FnOnce(&mut ContainerWriteTxn) -> R) -> R {
         let orchestrator = SideEffectTxnOrchestrator(Arc::downgrade(&self.0));
         self.0.with_write_txn(orchestrator, to_run)
     }
     #[cfg(feature = "experimental-txn")]
-    pub fn with_write_txn<R>(&self, to_run: impl FnOnce(&mut ContainerWriteTxn) -> R) -> R {
+    pub fn with_write_txn<'f, R>(
+        &self,
+        to_run: impl 'f + FnOnce(&mut ContainerWriteTxn) -> R,
+    ) -> R {
         let orchestrator = SideEffectTxnOrchestrator(Arc::downgrade(&self.0));
         self.0.with_write_txn(orchestrator, to_run)
     }
@@ -324,16 +327,16 @@ struct ContainerStore {
     curr_side_effect_txn_modified_ids: ReentrantMutex<RefCell<Option<HashSet<CapsuleId>>>>,
 }
 impl ContainerStore {
-    fn with_read_txn<R>(&self, to_run: impl FnOnce(&ContainerReadTxn) -> R) -> R {
+    fn with_read_txn<'f, R>(&self, to_run: impl 'f + FnOnce(&ContainerReadTxn) -> R) -> R {
         let txn = ContainerReadTxn::new(self.data.read());
         to_run(&txn)
     }
 
     #[allow(clippy::significant_drop_tightening)] // false positive
-    fn with_write_txn<R>(
+    fn with_write_txn<'f, R>(
         &self,
         orchestrator: SideEffectTxnOrchestrator,
-        to_run: impl FnOnce(&mut ContainerWriteTxn) -> R,
+        to_run: impl 'f + FnOnce(&mut ContainerWriteTxn) -> R,
     ) -> R {
         let data = self.data.write();
         let nodes = &mut self.nodes.lock().expect("Mutex shouldn't fail to lock");
@@ -348,9 +351,10 @@ impl ContainerStore {
     }
 }
 
-type SideEffectStateMutation = Box<dyn FnOnce(&mut dyn Any)>;
-type SideEffectStateMutater = Arc<dyn Send + Sync + Fn(SideEffectStateMutation)>;
-type SideEffectTxnRunner = Arc<dyn Send + Sync + Fn(Box<dyn FnOnce()>)>;
+type SideEffectStateMutation<'f> = Box<dyn 'f + FnOnce(&mut dyn Any)>;
+type SideEffectStateMutationRunner = Arc<dyn Send + Sync + Fn(SideEffectStateMutation)>;
+type SideEffectTxn<'f> = Box<dyn 'f + FnOnce()>;
+type SideEffectTxnRunner = Arc<dyn Send + Sync + Fn(SideEffectTxn)>;
 
 #[derive(Clone)]
 struct SideEffectTxnOrchestrator(Weak<ContainerStore>);
@@ -396,7 +400,7 @@ impl SideEffectTxnOrchestrator {
         }));
     }
 
-    fn run_txn(&self, txn: Box<dyn FnOnce()>) {
+    fn run_txn<'f>(&self, txn: Box<dyn 'f + FnOnce()>) {
         let Some(store) = self.0.upgrade() else {
             #[cfg(feature = "logging")]
             log::warn!("Attempted to run a side effect txn after Container disposal");
@@ -423,7 +427,7 @@ impl SideEffectTxnOrchestrator {
         drop(curr_txn_modified_ids); // ensure the lock is held until after the last store write txn
     }
 
-    fn create_state_mutater_for_id(&self, id: CapsuleId) -> SideEffectStateMutater {
+    fn create_state_mutater_for_id(&self, id: CapsuleId) -> SideEffectStateMutationRunner {
         let orchestrator = self.clone();
         Arc::new(move |mutation| orchestrator.run_mutation(CapsuleId::clone(&id), mutation))
     }
@@ -1107,10 +1111,7 @@ mod tests {
             let (_, set_state3) = get.as_ref(another_capsule).clone();
             let ((), _, run_txn) = register.raw(());
             move |n| {
-                let set_state1 = set_state1.clone();
-                let set_state2 = set_state2.clone();
-                let set_state3 = set_state3.clone();
-                run_txn(Box::new(move || {
+                run_txn(Box::new(|| {
                     set_state1(n);
                     set_state2(n);
                     set_state3(n);
@@ -1214,8 +1215,7 @@ mod tests {
             assert_eq!(s3, 2);
 
             container.read(txn_runner_capsule)({
-                let container = container.clone();
-                Box::new(move || {
+                Box::new(|| {
                     ss1(111);
                     container.read(batch_all_updates_action)(123);
                     ss3(111);
