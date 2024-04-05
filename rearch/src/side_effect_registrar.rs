@@ -1,7 +1,7 @@
 use std::{any::Any, cell::OnceCell};
 
 use crate::{
-    CData, SideEffect, SideEffectStateMutater, SideEffectTxnRunner, EFFECT_FAILED_CAST_MSG,
+    CData, SideEffect, SideEffectStateMutationRunner, SideEffectTxnRunner, EFFECT_FAILED_CAST_MSG,
 };
 
 /// Registers the given side effect and returns its build api.
@@ -9,7 +9,7 @@ use crate::{
 /// to register multiple side effects, simply pass them in together!
 pub struct SideEffectRegistrar<'a> {
     side_effect: &'a mut OnceCell<Box<dyn Any + Send>>,
-    side_effect_state_mutater: SideEffectStateMutater,
+    side_effect_state_mutation_runner: SideEffectStateMutationRunner,
     side_effect_txn_runner: SideEffectTxnRunner,
 }
 
@@ -21,12 +21,12 @@ impl<'a> SideEffectRegistrar<'a> {
     /// do not use this method in other contexts.
     pub fn new(
         side_effect: &'a mut OnceCell<Box<dyn Any + Send>>,
-        side_effect_state_mutater: SideEffectStateMutater,
+        side_effect_state_mutation_runner: SideEffectStateMutationRunner,
         side_effect_txn_runner: SideEffectTxnRunner,
     ) -> Self {
         Self {
             side_effect,
-            side_effect_state_mutater,
+            side_effect_state_mutation_runner,
             side_effect_txn_runner,
         }
     }
@@ -45,7 +45,7 @@ impl<'a> SideEffectRegistrar<'a> {
         initial: T,
     ) -> (
         &'a mut T,
-        impl CData + Fn(Box<dyn FnOnce(&mut T)>),
+        impl CData + for<'f> Fn(Box<dyn 'f + FnOnce(&mut T)>),
         SideEffectTxnRunner,
     )
     where
@@ -58,15 +58,21 @@ impl<'a> SideEffectRegistrar<'a> {
             .expect("Side effect should've been initialized in get_or_init above")
             .downcast_mut::<T>()
             .unwrap_or_else(|| panic!("{}", EFFECT_FAILED_CAST_MSG));
-        let state_mutater = move |mutation: Box<dyn FnOnce(&mut T)>| {
-            (self.side_effect_state_mutater)(Box::new(|data| {
-                let data = data
-                    .downcast_mut::<T>()
-                    .unwrap_or_else(|| panic!("{}", EFFECT_FAILED_CAST_MSG));
-                mutation(data);
-            }));
+
+        let mutation_runner = {
+            // NOTE: type alias needed to express the `'f + FnOnce` closure param with stable Rust
+            type TypedSideEffectMutation<'f, T> = Box<dyn 'f + FnOnce(&mut T)>;
+            move |mutation: TypedSideEffectMutation<T>| {
+                (self.side_effect_state_mutation_runner)(Box::new(|data| {
+                    let data = data
+                        .downcast_mut::<T>()
+                        .unwrap_or_else(|| panic!("{}", EFFECT_FAILED_CAST_MSG));
+                    mutation(data);
+                }));
+            }
         };
-        (data, state_mutater, self.side_effect_txn_runner)
+
+        (data, mutation_runner, self.side_effect_txn_runner)
     }
 }
 

@@ -18,7 +18,7 @@ pub trait StateTransformer: Send + 'static {
     fn as_output(&mut self) -> Self::Output<'_>;
 }
 
-type SideEffectMutation<ST> = Box<dyn FnOnce(&mut <ST as StateTransformer>::Inner)>;
+type SideEffectMutation<'f, ST> = Box<dyn 'f + FnOnce(&mut <ST as StateTransformer>::Inner)>;
 
 // NOTE: returns (), the no-op side effect
 #[must_use]
@@ -29,8 +29,8 @@ pub fn raw<ST: StateTransformer>(
 ) -> impl for<'a> SideEffect<
     Api<'a> = (
         ST::Output<'a>,
-        impl CData + Fn(Box<dyn FnOnce(&mut ST::Inner)>),
-        Arc<dyn Send + Sync + Fn(Box<dyn FnOnce()>)>,
+        impl CData + for<'f> Fn(Box<dyn 'f + FnOnce(&mut ST::Inner)>),
+        Arc<dyn Send + Sync + for<'f> Fn(Box<dyn 'f + FnOnce()>)>,
     ),
 > {
     EffectLifetimeFixer2::<_, ST>::new(move |register: SideEffectRegistrar| {
