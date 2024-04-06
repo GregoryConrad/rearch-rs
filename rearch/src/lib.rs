@@ -221,11 +221,11 @@ impl Container {
     /// Instead, use `read()` which wraps around `with_read_txn` and `with_write_txn`
     /// and ensures a consistent read amongst all capsules without extra effort.
     #[cfg(not(feature = "experimental-txn"))]
-    fn with_read_txn<'f, R>(&self, to_run: impl 'f + FnOnce(&ContainerReadTxn) -> R) -> R {
+    fn with_read_txn<R, F: FnOnce(&ContainerReadTxn) -> R>(&self, to_run: F) -> R {
         self.0.with_read_txn(to_run)
     }
     #[cfg(feature = "experimental-txn")]
-    pub fn with_read_txn<'f, R>(&self, to_run: impl 'f + FnOnce(&ContainerReadTxn) -> R) -> R {
+    pub fn with_read_txn<R, F: FnOnce(&ContainerReadTxn) -> R>(&self, to_run: F) -> R {
         self.0.with_read_txn(to_run)
     }
 
@@ -242,15 +242,12 @@ impl Container {
     /// This will result in a deadlock, and no future write transactions will be permitted.
     /// You can always trigger a rebuild in a new thread or after the `ContainerWriteTxn` drops.
     #[cfg(not(feature = "experimental-txn"))]
-    fn with_write_txn<'f, R>(&self, to_run: impl 'f + FnOnce(&mut ContainerWriteTxn) -> R) -> R {
+    fn with_write_txn<R, F: FnOnce(&mut ContainerWriteTxn) -> R>(&self, to_run: F) -> R {
         let orchestrator = SideEffectTxnOrchestrator(Arc::downgrade(&self.0));
         self.0.with_write_txn(orchestrator, to_run)
     }
     #[cfg(feature = "experimental-txn")]
-    pub fn with_write_txn<'f, R>(
-        &self,
-        to_run: impl 'f + FnOnce(&mut ContainerWriteTxn) -> R,
-    ) -> R {
+    pub fn with_write_txn<R, F: FnOnce(&mut ContainerWriteTxn) -> R>(&self, to_run: F) -> R {
         let orchestrator = SideEffectTxnOrchestrator(Arc::downgrade(&self.0));
         self.0.with_write_txn(orchestrator, to_run)
     }
@@ -326,16 +323,16 @@ struct ContainerStore {
     curr_side_effect_txn_modified_ids: ReentrantMutex<RefCell<Option<HashSet<CapsuleId>>>>,
 }
 impl ContainerStore {
-    fn with_read_txn<'f, R>(&self, to_run: impl 'f + FnOnce(&ContainerReadTxn) -> R) -> R {
+    fn with_read_txn<R, F: FnOnce(&ContainerReadTxn) -> R>(&self, to_run: F) -> R {
         let txn = ContainerReadTxn::new(self.data.read());
         to_run(&txn)
     }
 
     #[allow(clippy::significant_drop_tightening)] // false positive
-    fn with_write_txn<'f, R>(
+    fn with_write_txn<R, F: FnOnce(&mut ContainerWriteTxn) -> R>(
         &self,
         orchestrator: SideEffectTxnOrchestrator,
-        to_run: impl 'f + FnOnce(&mut ContainerWriteTxn) -> R,
+        to_run: F,
     ) -> R {
         let data = self.data.write();
         let nodes = &mut self.nodes.lock().expect("Mutex shouldn't fail to lock");
