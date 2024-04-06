@@ -59,17 +59,13 @@ impl<'a> SideEffectRegistrar<'a> {
             .downcast_mut::<T>()
             .unwrap_or_else(|| panic!("{}", EFFECT_FAILED_CAST_MSG));
 
-        let mutation_runner = {
-            // NOTE: type alias needed to express the `'f + FnOnce` closure param with stable Rust
-            type TypedSideEffectMutation<'f, T> = Box<dyn 'f + FnOnce(&mut T)>;
-            move |mutation: TypedSideEffectMutation<T>| {
-                (self.side_effect_state_mutation_runner)(Box::new(|data| {
-                    let data = data
-                        .downcast_mut::<T>()
-                        .unwrap_or_else(|| panic!("{}", EFFECT_FAILED_CAST_MSG));
-                    mutation(data);
-                }));
-            }
+        let mutation_runner = move |mutation: Box<dyn '_ + FnOnce(&mut T)>| {
+            (self.side_effect_state_mutation_runner)(Box::new(|data| {
+                let data = data
+                    .downcast_mut::<T>()
+                    .unwrap_or_else(|| panic!("{}", EFFECT_FAILED_CAST_MSG));
+                mutation(data);
+            }));
         };
 
         (data, mutation_runner, self.side_effect_txn_runner)
