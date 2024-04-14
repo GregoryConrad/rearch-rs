@@ -14,7 +14,8 @@ ReArch = re-imagined approach to application design and architecture
 > We must state definitions and provide for priorities and descriptions of data.
 > We must state relationships, not procedures.
 >
-> -- Grace Murray Hopper, _Management and the Computer of the Future_ (1962)</p>
+> -- Grace Murray Hopper, _Management and the Computer of the Future_ (1962)
+</p>
 
 ---
 
