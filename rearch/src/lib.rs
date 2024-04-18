@@ -369,22 +369,18 @@ impl SideEffectTxnOrchestrator {
         #[cfg(feature = "logging")]
         log::debug!("Mutating side effect state in Capsule ({:?})", id);
 
-        let orchestrator = self.clone();
-        self.run_txn(Box::new(move || {
+        self.run_txn(|| {
             // NOTE: The node is guaranteed to be in the graph here since it registers a side effect.
-            store.with_write_txn(orchestrator, {
-                let id = &id;
-                move |txn| {
-                    let effect = txn
-                        .side_effect(id)
-                        .get_mut()
-                        .expect(concat!(
-                            "The side effect must've been previously initialized ",
-                            "in order to use the side effect state mutater"
-                        ))
-                        .as_mut();
-                    mutation(effect);
-                }
+            store.with_write_txn(self.clone(), |txn| {
+                let effect = txn
+                    .side_effect(&id)
+                    .get_mut()
+                    .expect(concat!(
+                        "The side effect must've been previously initialized ",
+                        "in order to use the side effect state mutater"
+                    ))
+                    .as_mut();
+                mutation(effect);
             });
             store
                 .curr_side_effect_txn_modified_ids
@@ -393,10 +389,10 @@ impl SideEffectTxnOrchestrator {
                 .as_mut()
                 .expect("Called in a side effect txn, so txn should be Some")
                 .insert(id);
-        }));
+        });
     }
 
-    fn run_txn<'f>(&self, txn: Box<dyn 'f + FnOnce()>) {
+    fn run_txn(&self, txn: impl FnOnce()) {
         let Some(store) = self.0.upgrade() else {
             #[cfg(feature = "logging")]
             log::warn!("Attempted to run a side effect txn after Container disposal");
