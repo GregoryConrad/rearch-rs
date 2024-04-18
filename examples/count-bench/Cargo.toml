@@ -1,5 +1,5 @@
 [package]
-name = "example-multithread-bench"
+name = "example-count-bench"
 version = "0.0.0"
 publish = false
 edition.workspace = true

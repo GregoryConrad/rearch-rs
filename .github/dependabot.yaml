@@ -33,6 +33,6 @@ updates:
     schedule:
       interval: weekly
   - package-ecosystem: cargo
-    directory: "/examples/multithreaded-bench"
+    directory: "/examples/count-bench"
     schedule:
       interval: weekly
