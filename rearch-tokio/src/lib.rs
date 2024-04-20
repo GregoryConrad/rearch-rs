@@ -9,7 +9,7 @@ use std::{future::Future, sync::Arc};
 struct FunctionalDrop<F: FnOnce()>(Option<F>);
 impl<F: FnOnce()> Drop for FunctionalDrop<F> {
     fn drop(&mut self) {
-        if let Some(callback) = core::mem::take(&mut self.0) {
+        if let Some(callback) = self.0.take() {
             callback();
         }
     }
