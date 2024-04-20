@@ -144,8 +144,8 @@ impl ContainerWriteTxn<'_> {
         id: &CapsuleId,
     ) -> (Box<dyn Any + Send>, OnceCell<Box<dyn Any + Send>>) {
         let node = self.node_or_panic(id);
-        let capsule = std::mem::take(&mut node.capsule).expect(EXCLUSIVE_OWNER_MSG);
-        let side_effect = std::mem::take(&mut node.side_effect).expect(EXCLUSIVE_OWNER_MSG);
+        let capsule = node.capsule.take().expect(EXCLUSIVE_OWNER_MSG);
+        let side_effect = node.side_effect.take().expect(EXCLUSIVE_OWNER_MSG);
         (capsule, side_effect)
     }
 
@@ -215,9 +215,9 @@ impl ContainerWriteTxn<'_> {
     /// Panics if the node is not in the graph.
     fn build_single_node(&mut self, id: &CapsuleId) -> bool {
         // Remove old dependency info since it may change on this build
-        // We use std::mem::take below to prevent needing a clone on the existing dependencies
+        // We use mem::take below to prevent needing a clone on the existing dependencies
         let node = self.node_or_panic(id);
-        let old_deps = std::mem::take(&mut node.dependencies);
+        let old_deps = core::mem::take(&mut node.dependencies);
         for dep in old_deps {
             self.node_or_panic(&dep).dependents.remove(id);
         }
