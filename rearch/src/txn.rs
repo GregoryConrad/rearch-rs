@@ -1,5 +1,9 @@
-use concread::hashmap::{HashMapReadTxn, HashMapWriteTxn};
-use std::{any::Any, cell::OnceCell, collections::HashSet, sync::Arc};
+use parking_lot::{MutexGuard, RwLockReadGuard, RwLockWriteGuard};
+use std::{
+    any::Any,
+    cell::OnceCell,
+    collections::{HashMap, HashSet},
+};
 
 use crate::{
     Capsule, CapsuleId, CapsuleManager, CreateCapsuleId, SideEffectTxnOrchestrator,
@@ -8,11 +12,13 @@ use crate::{
 
 #[allow(clippy::module_name_repetitions)] // re-exported at crate level (not in module)
 pub struct ContainerReadTxn<'a> {
-    data: HashMapReadTxn<'a, CapsuleId, Arc<dyn Any + Send + Sync>>,
+    data: RwLockReadGuard<'a, HashMap<CapsuleId, Box<dyn Any + Send + Sync>>>,
 }
 
 impl<'a> ContainerReadTxn<'a> {
-    pub(crate) fn new(data: HashMapReadTxn<'a, CapsuleId, Arc<dyn Any + Send + Sync>>) -> Self {
+    pub(crate) fn new(
+        data: RwLockReadGuard<'a, HashMap<CapsuleId, Box<dyn Any + Send + Sync>>>,
+    ) -> Self {
         Self { data }
     }
 }
@@ -37,14 +43,14 @@ impl ContainerReadTxn<'_> {
 #[allow(clippy::module_name_repetitions)] // re-exported at crate level (not in module)
 pub struct ContainerWriteTxn<'a> {
     pub(crate) side_effect_txn_orchestrator: SideEffectTxnOrchestrator,
-    pub(crate) data: HashMapWriteTxn<'a, CapsuleId, Arc<dyn Any + Send + Sync>>,
-    nodes: &'a mut std::collections::HashMap<CapsuleId, CapsuleManager>,
+    pub(crate) data: RwLockWriteGuard<'a, HashMap<CapsuleId, Box<dyn Any + Send + Sync>>>,
+    nodes: MutexGuard<'a, HashMap<CapsuleId, CapsuleManager>>,
 }
 
 impl<'a> ContainerWriteTxn<'a> {
     pub(crate) fn new(
-        data: HashMapWriteTxn<'a, CapsuleId, Arc<dyn Any + Send + Sync>>,
-        nodes: &'a mut std::collections::HashMap<CapsuleId, CapsuleManager>,
+        data: RwLockWriteGuard<'a, HashMap<CapsuleId, Box<dyn Any + Send + Sync>>>,
+        nodes: MutexGuard<'a, HashMap<CapsuleId, CapsuleManager>>,
         side_effect_txn_orchestrator: SideEffectTxnOrchestrator,
     ) -> Self {
         Self {
@@ -55,7 +61,7 @@ impl<'a> ContainerWriteTxn<'a> {
     }
 }
 
-// NOTE: there must be absolutely no modifications to side effect states
+// NOTE: there must be absolutely no mutations to side effect states
 // outside of a side effect transaction.
 // While reading capsules and building *new* capsules is safe while a side effect txn is ongoing
 // (because capsule data is immutable and kept separate from side effects and nodes),
@@ -158,13 +164,6 @@ impl ContainerWriteTxn<'_> {
         node.side_effect = Some(side_effect);
     }
 
-    pub(crate) fn side_effect(&mut self, id: &CapsuleId) -> &mut OnceCell<Box<dyn Any + Send>> {
-        self.node_or_panic(id)
-            .side_effect
-            .as_mut()
-            .expect(EXCLUSIVE_OWNER_MSG)
-    }
-
     /// Forcefully builds the capsules with the supplied ids.
     ///
     /// # Panics
@@ -207,8 +206,7 @@ impl ContainerWriteTxn<'_> {
 
     /// Gets the requested node or panics if it is not in the graph
     fn node_or_panic(&mut self, id: &CapsuleId) -> &mut CapsuleManager {
-        self.node(id)
-            .expect("Requested node should be in the graph")
+        self.node(id).expect("Node should be in graph")
     }
 
     /// Builds only the requested node.

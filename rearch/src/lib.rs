@@ -1,12 +1,12 @@
 #![cfg_attr(feature = "experimental-api", feature(unboxed_closures, fn_traits))]
 
-use parking_lot::ReentrantMutex;
+use parking_lot::{Mutex, ReentrantMutex, RwLock};
 use std::{
     any::Any,
     cell::{OnceCell, RefCell},
-    collections::HashSet,
-    ops::Deref,
-    sync::{Arc, Mutex, Weak},
+    collections::{HashMap, HashSet},
+    ops::{Deref, DerefMut},
+    sync::{Arc, Weak},
 };
 
 mod capsule_key;
@@ -20,9 +20,6 @@ mod side_effect_registrar;
 pub use side_effect_registrar::SideEffectRegistrar;
 
 mod txn;
-#[cfg(feature = "experimental-txn")]
-pub use txn::{ContainerReadTxn, ContainerWriteTxn};
-#[cfg(not(feature = "experimental-txn"))]
 use txn::{ContainerReadTxn, ContainerWriteTxn};
 
 /// Capsules are blueprints for creating some immutable data
@@ -137,7 +134,7 @@ impl Container {
     /// Initializes a new `Container`.
     ///
     /// Containers contain no data when first created.
-    /// Use `read()` to populate and read some capsules!
+    /// Use [`Container::read`] to populate and read some capsules!
     #[must_use]
     pub fn new() -> Self {
         Self::default()
@@ -151,11 +148,8 @@ impl Container {
     /// inconsistency (say if you read one capsule and then the container is updated right after).
     ///
     /// # Concurrency
-    /// Blocks when any of the requested capsules' data is not present in the container.
-    ///
-    /// Internally, tries to read all supplied capsules with a read txn first (cheap),
-    /// but if that fails (i.e., capsules' data not present in the container),
-    /// spins up a write txn and initializes all needed capsules (which blocks).
+    /// First attempts to grab a read lock;
+    /// if the requested capsule is not initialized, falls back to grabbing a write lock.
     pub fn read<Capsules: CapsulesWithCloneRead>(&self, capsules: Capsules) -> Capsules::Data {
         capsules.read(self)
     }
@@ -164,11 +158,11 @@ impl Container {
     /// The provided listener is called once at the time of the listener's registration,
     /// and then once again everytime a dependency changes.
     ///
-    /// Returns a `ListenerHandle`, which doesn't do anything other than implement Drop,
-    /// and its Drop implementation will remove `listener` from the Container.
+    /// Returns a [`ListenerHandle`], which doesn't do anything other than implement [`Drop`],
+    /// and its [`Drop`] implementation will remove `listener` from the Container.
     ///
     /// Thus, if you want the handle to live for as long as the Container itself,
-    /// it is instead recommended to create a non-idempotent capsule
+    /// it is instead recommended to create a "non-idempotent" capsule
     /// (use the `effects::as_listener()` side effect)
     /// that acts as your listener. When you normally would call `Container::listen()`,
     /// instead call `container.read(my_non_idempotent_listener)` to initialize it.
@@ -213,6 +207,7 @@ impl Container {
         }
     }
 }
+// TODO(GregoryConrad): remove this impl
 impl Container {
     /// Runs the supplied callback with a `ContainerReadTxn` that allows you to read
     /// the current data in the container.
@@ -220,13 +215,8 @@ impl Container {
     /// You almost never want to use this function directly!
     /// Instead, use `read()` which wraps around `with_read_txn` and `with_write_txn`
     /// and ensures a consistent read amongst all capsules without extra effort.
-    #[cfg(not(feature = "experimental-txn"))]
     fn with_read_txn<R, F: FnOnce(&ContainerReadTxn) -> R>(&self, to_run: F) -> R {
-        self.0.with_read_txn(to_run)
-    }
-    #[cfg(feature = "experimental-txn")]
-    pub fn with_read_txn<R, F: FnOnce(&ContainerReadTxn) -> R>(&self, to_run: F) -> R {
-        self.0.with_read_txn(to_run)
+        to_run(&mut self.0.read_txn())
     }
 
     /// Runs the supplied callback with a `ContainerWriteTxn` that allows you to read and populate
@@ -241,15 +231,8 @@ impl Container {
     /// ABSOLUTELY DO NOT trigger any capsule side effects (i.e., rebuilds) in the callback!
     /// This will result in a deadlock, and no future write transactions will be permitted.
     /// You can always trigger a rebuild in a new thread or after the `ContainerWriteTxn` drops.
-    #[cfg(not(feature = "experimental-txn"))]
     fn with_write_txn<R, F: FnOnce(&mut ContainerWriteTxn) -> R>(&self, to_run: F) -> R {
-        let orchestrator = SideEffectTxnOrchestrator(Arc::downgrade(&self.0));
-        self.0.with_write_txn(orchestrator, to_run)
-    }
-    #[cfg(feature = "experimental-txn")]
-    pub fn with_write_txn<R, F: FnOnce(&mut ContainerWriteTxn) -> R>(&self, to_run: F) -> R {
-        let orchestrator = SideEffectTxnOrchestrator(Arc::downgrade(&self.0));
-        self.0.with_write_txn(orchestrator, to_run)
+        to_run(&mut self.0.write_txn())
     }
 }
 
@@ -271,8 +254,7 @@ impl Drop for ListenerHandle {
     fn drop(&mut self) {
         if let Some(store) = self.store.upgrade() {
             // NOTE: The node is guaranteed to be in the graph here since it is a listener.
-            let orchestrator = SideEffectTxnOrchestrator(Weak::clone(&self.store));
-            store.with_write_txn(orchestrator, |txn| txn.dispose_node(&self.id));
+            store.write_txn().dispose_node(&self.id);
         }
     }
 }
@@ -314,36 +296,110 @@ generate_capsule_list_impl!(A, B, C, D, E, F, G, H);
 
 /// The internal backing store for a `Container`.
 /// All capsule data is stored within `data`, and all data flow graph nodes are stored in `nodes`.
+/// When a side effect txn is underway, effected capsules of the txn will be recorded in
+/// `curr_side_effect_txn_modified_ids` to be later rebuilt in one sweep.
+///
+/// # Concurrency
+/// The concurrency here can be a bit hard to reason about (i.e., how do we prevent deadlocks?),
+/// but the concurrency model choosen enables as much parallelism as possible
+/// (favoring reads over side effect updates) while keeping different features logically separated.
+/// Here's a (very informal) proof that we won't encounter a deadlock.
+/// To start, capsule reads first attempt to grab a read lock on `data` to see if the capsule data
+/// is in the cache.
+/// If that fails (capsule is not built), we fallback to a write lock,
+/// in addition to grabbing a lock on the `nodes` Mutex,
+/// to initialize the capsule's data and any associated [`CapsuleManager`] data (like side effects).
+/// Finally, to rebuild a capsule and its downstream dependents,
+/// we must grab the side effect txn modified ids,
+/// grab and release the nodes Mutex for each capsule-dependent rebuild call,
+/// and then finally grab data write lock at the end to rebuild all necessary capsules.
+/// Thus, as long as we _always_ grab locks in the order of:
+/// 1. `curr_side_effect_txn_modified_ids`
+/// 2. `nodes`
+/// 3. `data`
+/// Skipping the locks we don't need, then we will never face a deadlock.
 #[derive(Default)]
 struct ContainerStore {
-    // NOTE: we store capsule data in an Arc here because it provides faster clones than a Box.
-    // This is because the Arc will have low contention, as the clones are always behind a Mutex.
-    data: concread::hashmap::HashMap<CapsuleId, Arc<dyn Any + Send + Sync>>,
-    nodes: Mutex<std::collections::HashMap<CapsuleId, CapsuleManager>>,
+    data: RwLock<HashMap<CapsuleId, Box<dyn Any + Send + Sync>>>,
+    nodes: Mutex<HashMap<CapsuleId, CapsuleManager>>,
     curr_side_effect_txn_modified_ids: ReentrantMutex<RefCell<Option<HashSet<CapsuleId>>>>,
 }
-impl ContainerStore {
-    fn with_read_txn<R, F: FnOnce(&ContainerReadTxn) -> R>(&self, to_run: F) -> R {
-        let txn = ContainerReadTxn::new(self.data.read());
-        to_run(&txn)
+trait ArcContainerStore {
+    fn read_txn(&self) -> ContainerReadTxn;
+    fn write_txn(&self) -> ContainerWriteTxn;
+    fn run_side_effect_mutation(&self, id: CapsuleId, mutation: SideEffectStateMutation);
+    fn run_txn<F: FnOnce()>(&self, txn: F);
+}
+impl ArcContainerStore for Arc<ContainerStore> {
+    fn read_txn(&self) -> ContainerReadTxn {
+        ContainerReadTxn::new(self.data.read())
     }
 
-    #[allow(clippy::significant_drop_tightening)] // false positive
-    fn with_write_txn<R, F: FnOnce(&mut ContainerWriteTxn) -> R>(
-        &self,
-        orchestrator: SideEffectTxnOrchestrator,
-        to_run: F,
-    ) -> R {
+    fn write_txn(&self) -> ContainerWriteTxn {
+        // NOTE: nodes must be acquired before data to remain deadlock free
+        let nodes = self.nodes.lock();
         let data = self.data.write();
-        let nodes = &mut self.nodes.lock().expect("Mutex shouldn't fail to lock");
-        let mut txn = ContainerWriteTxn::new(data, nodes, orchestrator);
+        ContainerWriteTxn::new(
+            data,
+            nodes,
+            SideEffectTxnOrchestrator(Self::downgrade(self)),
+        )
+    }
 
-        let return_val = to_run(&mut txn);
+    fn run_side_effect_mutation(&self, id: CapsuleId, mutation: SideEffectStateMutation) {
+        #[cfg(feature = "logging")]
+        log::debug!("Mutating side effect state in Capsule ({:?})", id);
 
-        // We must commit the txn to avoid leaving the data and nodes in an inconsistent state
-        txn.data.commit();
+        self.run_txn(|| {
+            mutation(
+                self.nodes
+                    .lock()
+                    .deref_mut()
+                    .get_mut(&id)
+                    .expect("The node must be in the graph since it registers a side effect")
+                    .side_effect
+                    .as_mut()
+                    .expect("We should have sole ownership over side_effect since we hold the lock")
+                    .get_mut()
+                    .expect("Side effect must have been previously initialized to invoke a rebuild")
+                    .as_mut(),
+            );
+            self.curr_side_effect_txn_modified_ids
+                .lock()
+                .deref()
+                .borrow_mut()
+                .as_mut()
+                .expect("Called in a side effect txn, so txn should be Some")
+                .insert(id);
+        });
+    }
 
-        return_val
+    fn run_txn<F: FnOnce()>(&self, txn: F) {
+        let curr_txn_modified_ids = self.curr_side_effect_txn_modified_ids.lock();
+
+        let is_root_txn = curr_txn_modified_ids.borrow().is_none();
+        if is_root_txn {
+            #[cfg(feature = "logging")]
+            log::debug!("Starting side effect transaction");
+
+            *curr_txn_modified_ids.deref().borrow_mut() = Some(HashSet::new());
+        }
+
+        txn();
+
+        if is_root_txn {
+            let to_build = curr_txn_modified_ids
+                .deref()
+                .borrow_mut()
+                .take()
+                .expect("Ensured initialization above");
+            self.write_txn().build_capsules_or_panic(&to_build);
+
+            #[cfg(feature = "logging")]
+            log::debug!("Completed side effect transaction");
+        }
+
+        drop(curr_txn_modified_ids); // ensure the lock is held until after the last store write txn
     }
 }
 
@@ -355,78 +411,31 @@ type SideEffectTxnRunner = Arc<dyn Send + Sync + Fn(SideEffectTxn)>;
 #[derive(Clone)]
 struct SideEffectTxnOrchestrator(Weak<ContainerStore>);
 impl SideEffectTxnOrchestrator {
-    fn run_mutation(&self, id: CapsuleId, mutation: SideEffectStateMutation) {
-        let Some(store) = self.0.upgrade() else {
-            #[cfg(feature = "logging")]
-            log::warn!(
-                "Attempted to mutate side effect state after Container disposal on Capsule ({:?})",
-                id
-            );
+    fn create_state_mutater_for_id(self, id: CapsuleId) -> SideEffectStateMutationRunner {
+        Arc::new(move |mutation| {
+            let Some(store) = self.0.upgrade() else {
+                #[cfg(feature = "logging")]
+                log::warn!(
+                    "Attempted to mutate side effect after Container disposal on Capsule ({:?})",
+                    id
+                );
+                return;
+            };
 
-            return;
-        };
-
-        #[cfg(feature = "logging")]
-        log::debug!("Mutating side effect state in Capsule ({:?})", id);
-
-        self.run_txn(|| {
-            // NOTE: The node is guaranteed to be in the graph here since it registers a side effect.
-            store.with_write_txn(self.clone(), |txn| {
-                let effect = txn
-                    .side_effect(&id)
-                    .get_mut()
-                    .expect(concat!(
-                        "The side effect must've been previously initialized ",
-                        "in order to use the side effect state mutater"
-                    ))
-                    .as_mut();
-                mutation(effect);
-            });
-            store
-                .curr_side_effect_txn_modified_ids
-                .lock()
-                .borrow_mut()
-                .as_mut()
-                .expect("Called in a side effect txn, so txn should be Some")
-                .insert(id);
-        });
+            store.run_side_effect_mutation(id.clone(), mutation);
+        })
     }
 
-    fn run_txn(&self, txn: impl FnOnce()) {
-        let Some(store) = self.0.upgrade() else {
-            #[cfg(feature = "logging")]
-            log::warn!("Attempted to run a side effect txn after Container disposal");
+    fn create_txn_runner(self) -> SideEffectTxnRunner {
+        Arc::new(move |txn| {
+            let Some(store) = self.0.upgrade() else {
+                #[cfg(feature = "logging")]
+                log::warn!("Attempted to run a side effect txn after Container disposal");
+                return;
+            };
 
-            return;
-        };
-        let curr_txn_modified_ids = store.curr_side_effect_txn_modified_ids.lock();
-
-        let is_root_txn = curr_txn_modified_ids.borrow().is_none();
-        if is_root_txn {
-            *curr_txn_modified_ids.borrow_mut() = Some(HashSet::new());
-        }
-
-        txn();
-
-        if is_root_txn {
-            let to_build = std::mem::take(&mut *curr_txn_modified_ids.borrow_mut())
-                .expect("Ensured initialization above");
-            store.with_write_txn(self.clone(), move |txn| {
-                txn.build_capsules_or_panic(&to_build);
-            });
-        }
-
-        drop(curr_txn_modified_ids); // ensure the lock is held until after the last store write txn
-    }
-
-    fn create_state_mutater_for_id(&self, id: CapsuleId) -> SideEffectStateMutationRunner {
-        let orchestrator = self.clone();
-        Arc::new(move |mutation| orchestrator.run_mutation(CapsuleId::clone(&id), mutation))
-    }
-
-    fn create_txn_runner(&self) -> SideEffectTxnRunner {
-        let orchestrator = self.clone();
-        Arc::new(move |txn| orchestrator.run_txn(txn))
+            store.run_txn(txn);
+        })
     }
 }
 
@@ -471,8 +480,10 @@ impl CapsuleManager {
         let new_data = {
             let side_effect_state_mutater = txn
                 .side_effect_txn_orchestrator
+                .clone()
                 .create_state_mutater_for_id(CapsuleId::clone(&id));
-            let side_effect_txn_runner = txn.side_effect_txn_orchestrator.create_txn_runner();
+            let side_effect_txn_runner =
+                txn.side_effect_txn_orchestrator.clone().create_txn_runner();
 
             let (capsule, mut side_effect) = txn.take_capsule_and_side_effect(&id);
             let new_data = capsule
@@ -498,7 +509,7 @@ impl CapsuleManager {
             .map(downcast_capsule_data::<C>)
             .map_or(true, |old_data| !C::eq(old_data, &new_data));
 
-        txn.data.insert(id, Arc::new(new_data));
+        txn.data.insert(id, Box::new(new_data));
 
         did_change
     }
@@ -769,7 +780,7 @@ mod tests {
 
         #[allow(clippy::needless_pass_by_value)]
         fn increment_build_count<C: Capsule>(_capsule: C) {
-            let mut cell = BUILDS.lock().unwrap();
+            let mut cell = BUILDS.lock();
             cell.get_or_init(HashMap::new);
             let entry = cell.get_mut().unwrap().entry(TypeId::of::<C>());
             *entry.or_default() += 1;
@@ -779,7 +790,6 @@ mod tests {
         fn get_build_count<C: Capsule>(_capsule: C) -> u32 {
             *BUILDS
                 .lock()
-                .unwrap()
                 .get()
                 .unwrap()
                 .get(&TypeId::of::<C>())
