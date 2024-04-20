@@ -167,6 +167,9 @@ impl Container {
     /// that acts as your listener. When you normally would call `Container::listen()`,
     /// instead call `container.read(my_non_idempotent_listener)` to initialize it.
     ///
+    /// # Concurrency
+    /// Internally tries to grab a write lock, so this function is blocking.
+    ///
     /// # Panics
     /// Panics if you attempt to register the same listener twice,
     /// before the first `ListenerHandle` is dropped.
@@ -191,48 +194,20 @@ impl Container {
         let id = tmp_capsule.id();
 
         // Put the temporary capsule into the container to listen to updates
-        self.with_write_txn(move |txn| {
-            assert_eq!(
-                txn.try_read(&tmp_capsule),
-                None,
-                "You cannot pass the same listener into Container::listen() {}",
-                "until the original returned ListenerHandle is dropped!"
-            );
-            txn.read_or_init(tmp_capsule);
-        });
+        let mut txn = self.0.write_txn();
+        assert_eq!(
+            txn.try_read(&tmp_capsule),
+            None,
+            "You cannot pass the same listener into Container::listen() {}",
+            "until the original returned ListenerHandle is dropped!"
+        );
+        txn.ensure_initialized(tmp_capsule);
+        drop(txn);
 
         ListenerHandle {
             id,
             store: Arc::downgrade(&self.0),
         }
-    }
-}
-// TODO(GregoryConrad): remove this impl
-impl Container {
-    /// Runs the supplied callback with a `ContainerReadTxn` that allows you to read
-    /// the current data in the container.
-    ///
-    /// You almost never want to use this function directly!
-    /// Instead, use `read()` which wraps around `with_read_txn` and `with_write_txn`
-    /// and ensures a consistent read amongst all capsules without extra effort.
-    fn with_read_txn<R, F: FnOnce(&ContainerReadTxn) -> R>(&self, to_run: F) -> R {
-        to_run(&mut self.0.read_txn())
-    }
-
-    /// Runs the supplied callback with a `ContainerWriteTxn` that allows you to read and populate
-    /// the current data in the container.
-    ///
-    /// You almost never want to use this function directly!
-    /// Instead, use `read()` which wraps around `with_read_txn` and `with_write_txn`
-    /// and ensures a consistent read amongst all capsules without extra effort.
-    ///
-    /// This method blocks other writers (readers always have unrestricted access).
-    ///
-    /// ABSOLUTELY DO NOT trigger any capsule side effects (i.e., rebuilds) in the callback!
-    /// This will result in a deadlock, and no future write transactions will be permitted.
-    /// You can always trigger a rebuild in a new thread or after the `ContainerWriteTxn` drops.
-    fn with_write_txn<R, F: FnOnce(&mut ContainerWriteTxn) -> R>(&self, to_run: F) -> R {
-        to_run(&mut self.0.write_txn())
     }
 }
 
@@ -274,11 +249,15 @@ macro_rules! generate_capsule_list_impl {
                 type Data = ($($C::Data),*);
                 fn read(self, container: &Container) -> Self::Data {
                     let ($([<i $C>]),*) = self;
-                    if let ($(Some([<i $C>])),*) =
-                        container.with_read_txn(|txn| ($(txn.try_read(&[<i $C>])),*)) {
+                    let attempted_read_capsules = {
+                        let txn = container.0.read_txn();
+                        ($(txn.try_read(&[<i $C>])),*)
+                    };
+                    if let ($(Some([<i $C>])),*) = attempted_read_capsules {
                         ($([<i $C>]),*)
                     } else {
-                        container.with_write_txn(|txn| ($(txn.read_or_init([<i $C>])),*))
+                        let mut txn = container.0.write_txn();
+                        ($(txn.read_or_init([<i $C>])),*)
                     }
                 }
             }
@@ -328,7 +307,7 @@ trait ArcContainerStore {
     fn read_txn(&self) -> ContainerReadTxn;
     fn write_txn(&self) -> ContainerWriteTxn;
     fn run_side_effect_mutation(&self, id: CapsuleId, mutation: SideEffectStateMutation);
-    fn run_txn<F: FnOnce()>(&self, txn: F);
+    fn run_side_effect_txn<F: FnOnce()>(&self, txn: F);
 }
 impl ArcContainerStore for Arc<ContainerStore> {
     fn read_txn(&self) -> ContainerReadTxn {
@@ -350,7 +329,7 @@ impl ArcContainerStore for Arc<ContainerStore> {
         #[cfg(feature = "logging")]
         log::debug!("Mutating side effect state in Capsule ({:?})", id);
 
-        self.run_txn(|| {
+        self.run_side_effect_txn(|| {
             mutation(
                 self.nodes
                     .lock()
@@ -374,7 +353,7 @@ impl ArcContainerStore for Arc<ContainerStore> {
         });
     }
 
-    fn run_txn<F: FnOnce()>(&self, txn: F) {
+    fn run_side_effect_txn<F: FnOnce()>(&self, txn: F) {
         let curr_txn_modified_ids = self.curr_side_effect_txn_modified_ids.lock();
 
         let is_root_txn = curr_txn_modified_ids.borrow().is_none();
@@ -434,7 +413,7 @@ impl SideEffectTxnOrchestrator {
                 return;
             };
 
-            store.run_txn(txn);
+            store.run_side_effect_txn(txn);
         })
     }
 }
@@ -524,7 +503,11 @@ impl CapsuleManager {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::too_many_lines,
+    clippy::cognitive_complexity
+)]
 mod tests {
     use crate::*;
 
@@ -580,18 +563,14 @@ mod tests {
         }
 
         let container = Container::new();
+        let txn = container.0.read_txn();
         assert_eq!(
             (None, None),
-            container.with_read_txn(|txn| (txn.try_read(&count), txn.try_read(&count_plus_one)))
+            (txn.try_read(&count), txn.try_read(&count_plus_one))
         );
-        assert_eq!(
-            1,
-            container.with_write_txn(|txn| txn.read_or_init(count_plus_one))
-        );
-        assert_eq!(
-            0,
-            container.with_read_txn(|txn| txn.try_read(&count).unwrap())
-        );
+        drop(txn);
+        assert_eq!(1, container.0.write_txn().read_or_init(count_plus_one));
+        assert_eq!(0, container.0.read_txn().try_read(&count).unwrap());
 
         let container = Container::new();
         assert_eq!((0, 1), container.read((count, count_plus_one)));
@@ -772,7 +751,6 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::too_many_lines, clippy::cognitive_complexity)]
     fn eq_check_skips_unneeded_rebuilds() {
         use std::{any::TypeId, collections::HashMap};
 
@@ -1043,52 +1021,46 @@ mod tests {
         }
 
         let container = Container::new();
-        let mut read_txn_counter = 0;
 
-        container.with_read_txn(|txn| {
-            read_txn_counter += 1;
-            assert!(txn.try_read(&stateful_a).is_none());
-            assert_eq!(txn.try_read(&a), None);
-            assert_eq!(txn.try_read(&b), None);
-            assert_eq!(txn.try_read(&c), None);
-            assert_eq!(txn.try_read(&d), None);
-            assert_eq!(txn.try_read(&e), None);
-            assert_eq!(txn.try_read(&f), None);
-            assert_eq!(txn.try_read(&g), None);
-            assert_eq!(txn.try_read(&h), None);
-        });
+        let txn = container.0.read_txn();
+        assert!(txn.try_read(&stateful_a).is_none());
+        assert_eq!(txn.try_read(&a), None);
+        assert_eq!(txn.try_read(&b), None);
+        assert_eq!(txn.try_read(&c), None);
+        assert_eq!(txn.try_read(&d), None);
+        assert_eq!(txn.try_read(&e), None);
+        assert_eq!(txn.try_read(&f), None);
+        assert_eq!(txn.try_read(&g), None);
+        assert_eq!(txn.try_read(&h), None);
+        drop(txn);
 
         container.read((d, g));
 
-        container.with_read_txn(|txn| {
-            read_txn_counter += 1;
-            assert!(txn.try_read(&stateful_a).is_some());
-            assert_eq!(txn.try_read(&a).unwrap(), 0);
-            assert_eq!(txn.try_read(&b).unwrap(), 1);
-            assert_eq!(txn.try_read(&c).unwrap(), 2);
-            assert_eq!(txn.try_read(&d).unwrap(), 2);
-            assert_eq!(txn.try_read(&e).unwrap(), 1);
-            assert_eq!(txn.try_read(&f).unwrap(), 1);
-            assert_eq!(txn.try_read(&g).unwrap(), 3);
-            assert_eq!(txn.try_read(&h).unwrap(), 1);
-        });
+        let txn = container.0.read_txn();
+        assert!(txn.try_read(&stateful_a).is_some());
+        assert_eq!(txn.try_read(&a).unwrap(), 0);
+        assert_eq!(txn.try_read(&b).unwrap(), 1);
+        assert_eq!(txn.try_read(&c).unwrap(), 2);
+        assert_eq!(txn.try_read(&d).unwrap(), 2);
+        assert_eq!(txn.try_read(&e).unwrap(), 1);
+        assert_eq!(txn.try_read(&f).unwrap(), 1);
+        assert_eq!(txn.try_read(&g).unwrap(), 3);
+        assert_eq!(txn.try_read(&h).unwrap(), 1);
+        drop(txn);
 
         container.read(stateful_a).1(10);
 
-        container.with_read_txn(|txn| {
-            read_txn_counter += 1;
-            assert!(txn.try_read(&stateful_a).is_some());
-            assert_eq!(txn.try_read(&a).unwrap(), 10);
-            assert_eq!(txn.try_read(&b).unwrap(), 11);
-            assert_eq!(txn.try_read(&c), None);
-            assert_eq!(txn.try_read(&d), None);
-            assert_eq!(txn.try_read(&e).unwrap(), 11);
-            assert_eq!(txn.try_read(&f).unwrap(), 11);
-            assert_eq!(txn.try_read(&g), None);
-            assert_eq!(txn.try_read(&h).unwrap(), 1);
-        });
-
-        assert_eq!(read_txn_counter, 3);
+        let txn = container.0.read_txn();
+        assert!(txn.try_read(&stateful_a).is_some());
+        assert_eq!(txn.try_read(&a).unwrap(), 10);
+        assert_eq!(txn.try_read(&b).unwrap(), 11);
+        assert_eq!(txn.try_read(&c), None);
+        assert_eq!(txn.try_read(&d), None);
+        assert_eq!(txn.try_read(&e).unwrap(), 11);
+        assert_eq!(txn.try_read(&f).unwrap(), 11);
+        assert_eq!(txn.try_read(&g), None);
+        assert_eq!(txn.try_read(&h).unwrap(), 1);
+        drop(txn);
     }
 
     mod side_effect_txns {
