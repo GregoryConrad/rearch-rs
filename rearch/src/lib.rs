@@ -22,6 +22,9 @@ pub use side_effect_registrar::SideEffectRegistrar;
 mod txn;
 use txn::{ContainerReadTxn, ContainerWriteTxn};
 
+mod read_capsules;
+pub use read_capsules::{CapsulesWithCloneRead, CapsulesWithRefRead};
+
 /// Capsules are blueprints for creating some immutable data
 /// and do not actually contain any data themselves.
 /// See the documentation for more.
@@ -149,9 +152,38 @@ impl Container {
     ///
     /// # Concurrency
     /// First attempts to grab a read lock;
-    /// if the requested capsule is not initialized, falls back to grabbing a write lock.
+    /// if any of the requested capsules are not initialized, falls back to grabbing a write lock.
     pub fn read<Capsules: CapsulesWithCloneRead>(&self, capsules: Capsules) -> Capsules::Data {
         capsules.read(self)
+    }
+
+    /// Performs a *consistent* (ref) read on the supplied capsules.
+    ///
+    /// Consistency is important here: if you need the current data from a few different capsules,
+    /// *do not* read them individually, but rather group them together with one `read_ref()` call.
+    /// If you read capsules one at a time, there will be increased overhead in addition to possible
+    /// inconsistency (say if you read one capsule and then the container is updated right after).
+    ///
+    /// It is typically recommended to use [`Container::read`] when your capsule data is [`Clone`].
+    ///
+    /// # Concurrency
+    /// First attempts to grab a read lock;
+    /// if any of the requested capsules are not initialized, falls back to grabbing a write lock,
+    /// and will downgrade the write lock to a read lock once initialized.
+    ///
+    /// The callback will be invoked while holding a read lock on the container,
+    /// so it is best to keep the callback on the quicker side
+    /// (unless you don't mind blocking side effect updates and uninitialized reads).
+    pub fn read_ref<Capsules, Callback, CallbackReturn>(
+        &self,
+        capsules: Capsules,
+        callback: Callback,
+    ) -> CallbackReturn
+    where
+        Capsules: CapsulesWithRefRead,
+        Callback: FnOnce(Capsules::Data<'_>) -> CallbackReturn,
+    {
+        capsules.read(self, callback)
     }
 
     /// Provides a mechanism to *temporarily* listen to changes in some capsule(s).
@@ -233,45 +265,6 @@ impl Drop for ListenerHandle {
         }
     }
 }
-
-/// A list of capsules with cloneable data.
-/// This is either a singular capsule, like `foo_capsule`,
-/// or a tuple, like `(foo_capsule, bar_capsule)`.
-pub trait CapsulesWithCloneRead {
-    type Data;
-    fn read(self, container: &Container) -> Self::Data;
-}
-macro_rules! generate_capsule_list_impl {
-    ($($C:ident),+) => {
-        paste::paste! {
-            #[allow(non_snake_case, unused_parens)]
-            impl<$($C: Capsule),*> CapsulesWithCloneRead for ($($C),*) where $($C::Data: Clone),* {
-                type Data = ($($C::Data),*);
-                fn read(self, container: &Container) -> Self::Data {
-                    let ($([<i $C>]),*) = self;
-                    let attempted_read_capsules = {
-                        let txn = container.0.read_txn();
-                        ($(txn.try_read(&[<i $C>])),*)
-                    };
-                    if let ($(Some([<i $C>])),*) = attempted_read_capsules {
-                        ($([<i $C>]),*)
-                    } else {
-                        let mut txn = container.0.write_txn();
-                        ($(txn.read_or_init([<i $C>])),*)
-                    }
-                }
-            }
-        }
-    };
-}
-generate_capsule_list_impl!(A);
-generate_capsule_list_impl!(A, B);
-generate_capsule_list_impl!(A, B, C);
-generate_capsule_list_impl!(A, B, C, D);
-generate_capsule_list_impl!(A, B, C, D, E);
-generate_capsule_list_impl!(A, B, C, D, E, F);
-generate_capsule_list_impl!(A, B, C, D, E, F, G);
-generate_capsule_list_impl!(A, B, C, D, E, F, G, H);
 
 /// The internal backing store for a `Container`.
 /// All capsule data is stored within `data`, and all data flow graph nodes are stored in `nodes`.

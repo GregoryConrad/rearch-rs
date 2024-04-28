@@ -12,7 +12,7 @@ use crate::{
 
 #[allow(clippy::module_name_repetitions)] // re-exported at crate level (not in module)
 pub struct ContainerReadTxn<'a> {
-    data: RwLockReadGuard<'a, HashMap<CapsuleId, Box<dyn Any + Send + Sync>>>,
+    pub(crate) data: RwLockReadGuard<'a, HashMap<CapsuleId, Box<dyn Any + Send + Sync>>>,
 }
 
 impl<'a> ContainerReadTxn<'a> {
@@ -58,6 +58,10 @@ impl<'a> ContainerWriteTxn<'a> {
             data,
             nodes,
         }
+    }
+
+    pub(crate) fn downgrade(self) -> ContainerReadTxn<'a> {
+        ContainerReadTxn::new(RwLockWriteGuard::downgrade(self.data))
     }
 }
 
