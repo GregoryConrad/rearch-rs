@@ -1,6 +1,64 @@
 
 
+## v0.10.1 (2024-04-28)
+
+### Chore
+
+ - <csr-id-3992390b4874ecaca635b7397e40f636b83a5b33/> specify rust-version in rearch Cargo.toml
+
+### New Features
+
+ - <csr-id-4d4ee1c7cc524c47c71dee375ba577e8cee4b637/> add Container::read_ref API
+
+### Performance
+
+ - <csr-id-6784ff381856be8ec5cc3a8864928edb53101438/> remove concread dependency
+ - <csr-id-92b4810886cd632a29b2fc9d0e5aa98913faa99d/> remove unnecessary heap allocation
+
+### Refactor
+
+ - <csr-id-b7c3fe566d76f431afac3195a8eb1bc35ca1149c/> remove the with_txn FnOnce lifetime param
+   Also rewrote the corresponding functions with generics.
+   Generics do not have implicit 'static lifetimes, unlike Box<dyn Trait>.
+
+### Style
+
+ - <csr-id-80b3aa4c61b27131feba2567a1e3bb4f82dc5457/> remove unnecessary type/ref workaround
+
+### Commit Statistics
+
+<csr-read-only-do-not-edit/>
+
+ - 6 commits contributed to the release over the course of 21 calendar days.
+ - 23 days passed between releases.
+ - 6 commits were understood as [conventional](https://www.conventionalcommits.org).
+ - 4 unique issues were worked on: [#42](https://github.com/GregoryConrad/rearch-rs/issues/42), [#43](https://github.com/GregoryConrad/rearch-rs/issues/43), [#46](https://github.com/GregoryConrad/rearch-rs/issues/46), [#49](https://github.com/GregoryConrad/rearch-rs/issues/49)
+
+### Commit Details
+
+<csr-read-only-do-not-edit/>
+
+<details><summary>view details</summary>
+
+ * **[#42](https://github.com/GregoryConrad/rearch-rs/issues/42)**
+    - Remove the with_txn FnOnce lifetime param ([`b7c3fe5`](https://github.com/GregoryConrad/rearch-rs/commit/b7c3fe566d76f431afac3195a8eb1bc35ca1149c))
+ * **[#43](https://github.com/GregoryConrad/rearch-rs/issues/43)**
+    - Remove unnecessary type/ref workaround ([`80b3aa4`](https://github.com/GregoryConrad/rearch-rs/commit/80b3aa4c61b27131feba2567a1e3bb4f82dc5457))
+ * **[#46](https://github.com/GregoryConrad/rearch-rs/issues/46)**
+    - Remove concread dependency ([`6784ff3`](https://github.com/GregoryConrad/rearch-rs/commit/6784ff381856be8ec5cc3a8864928edb53101438))
+ * **[#49](https://github.com/GregoryConrad/rearch-rs/issues/49)**
+    - Add Container::read_ref API ([`4d4ee1c`](https://github.com/GregoryConrad/rearch-rs/commit/4d4ee1c7cc524c47c71dee375ba577e8cee4b637))
+ * **Uncategorized**
+    - Remove unnecessary heap allocation ([`92b4810`](https://github.com/GregoryConrad/rearch-rs/commit/92b4810886cd632a29b2fc9d0e5aa98913faa99d))
+    - Specify rust-version in rearch Cargo.toml ([`3992390`](https://github.com/GregoryConrad/rearch-rs/commit/3992390b4874ecaca635b7397e40f636b83a5b33))
+</details>
+
 ## v0.10.0 (2024-04-05)
+
+<csr-id-f9ab7a02192bf7555b26623081a85769d973a7ac/>
+<csr-id-6577780029d6e08d67219367fd5a1cc99cb8f3c4/>
+<csr-id-f14098ac00541b4afc501fd0c11e58e695c85a45/>
+<csr-id-92e9892d650b9368e12c35269de24e74b83848dc/>
 
 ### Chore
 
@@ -28,7 +86,7 @@
 
 <csr-read-only-do-not-edit/>
 
- - 5 commits contributed to the release over the course of 79 calendar days.
+ - 6 commits contributed to the release over the course of 80 calendar days.
  - 80 days passed between releases.
  - 5 commits were understood as [conventional](https://www.conventionalcommits.org).
  - 4 unique issues were worked on: [#36](https://github.com/GregoryConrad/rearch-rs/issues/36), [#37](https://github.com/GregoryConrad/rearch-rs/issues/37), [#40](https://github.com/GregoryConrad/rearch-rs/issues/40), [#41](https://github.com/GregoryConrad/rearch-rs/issues/41)
@@ -48,6 +106,7 @@
  * **[#41](https://github.com/GregoryConrad/rearch-rs/issues/41)**
     - Rewrite old CapsuleKey as trait alias ([`92e9892`](https://github.com/GregoryConrad/rearch-rs/commit/92e9892d650b9368e12c35269de24e74b83848dc))
  * **Uncategorized**
+    - Release rearch v0.10.0, rearch-effects v0.5.0, rearch-tokio v0.10.0 ([`850e353`](https://github.com/GregoryConrad/rearch-rs/commit/850e353051de1d5970b34e8c7d75114f5f24db34))
     - Bump version numbers ([`f9ab7a0`](https://github.com/GregoryConrad/rearch-rs/commit/f9ab7a02192bf7555b26623081a85769d973a7ac))
 </details>
 

@@ -1,6 +1,35 @@
 
 
+## v0.10.1 (2024-04-28)
+
+### Performance
+
+ - <csr-id-6784ff381856be8ec5cc3a8864928edb53101438/> remove concread dependency
+
+### Commit Statistics
+
+<csr-read-only-do-not-edit/>
+
+ - 1 commit contributed to the release over the course of 7 calendar days.
+ - 23 days passed between releases.
+ - 1 commit was understood as [conventional](https://www.conventionalcommits.org).
+ - 1 unique issue was worked on: [#46](https://github.com/GregoryConrad/rearch-rs/issues/46)
+
+### Commit Details
+
+<csr-read-only-do-not-edit/>
+
+<details><summary>view details</summary>
+
+ * **[#46](https://github.com/GregoryConrad/rearch-rs/issues/46)**
+    - Remove concread dependency ([`6784ff3`](https://github.com/GregoryConrad/rearch-rs/commit/6784ff381856be8ec5cc3a8864928edb53101438))
+</details>
+
 ## v0.10.0 (2024-04-05)
+
+<csr-id-f9ab7a02192bf7555b26623081a85769d973a7ac/>
+<csr-id-429990d91cb66797e5f678638ce5d22c2e12677f/>
+<csr-id-f14098ac00541b4afc501fd0c11e58e695c85a45/>
 
 ### Chore
 
@@ -15,7 +44,7 @@
 
 <csr-read-only-do-not-edit/>
 
- - 3 commits contributed to the release over the course of 33 calendar days.
+ - 4 commits contributed to the release over the course of 33 calendar days.
  - 80 days passed between releases.
  - 3 commits were understood as [conventional](https://www.conventionalcommits.org).
  - 1 unique issue was worked on: [#37](https://github.com/GregoryConrad/rearch-rs/issues/37)
@@ -29,6 +58,7 @@
  * **[#37](https://github.com/GregoryConrad/rearch-rs/issues/37)**
     - Fix latest docs-styling clippy lint ([`f14098a`](https://github.com/GregoryConrad/rearch-rs/commit/f14098ac00541b4afc501fd0c11e58e695c85a45))
  * **Uncategorized**
+    - Release rearch v0.10.0, rearch-effects v0.5.0, rearch-tokio v0.10.0 ([`850e353`](https://github.com/GregoryConrad/rearch-rs/commit/850e353051de1d5970b34e8c7d75114f5f24db34))
     - Bump version numbers ([`f9ab7a0`](https://github.com/GregoryConrad/rearch-rs/commit/f9ab7a02192bf7555b26623081a85769d973a7ac))
     - Temporarily allow multiple crate versions ([`429990d`](https://github.com/GregoryConrad/rearch-rs/commit/429990d91cb66797e5f678638ce5d22c2e12677f))
 </details>
