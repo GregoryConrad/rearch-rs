@@ -92,8 +92,7 @@ where
     EffectLifetimeFixer1::<_, ST>::new(move |register: SideEffectRegistrar| {
         let (state, update_state, _) = register.register(raw::<ST>(initial));
         (state, move |action| {
-            let reducer = reducer.clone();
-            update_state(Box::new(move |state| *state = reducer(state, action)));
+            update_state(Box::new(|state| *state = reducer(state, action)));
         })
     })
 }
