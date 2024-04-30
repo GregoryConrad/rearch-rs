@@ -4,6 +4,9 @@ use std::sync::Arc;
 mod state_transformers;
 pub use state_transformers::*;
 
+mod multi;
+pub use multi::*;
+
 mod effect_lifetime_fixers;
 use effect_lifetime_fixers::{EffectLifetimeFixer0, EffectLifetimeFixer1, EffectLifetimeFixer2};
 
@@ -67,7 +70,7 @@ pub fn value<ST: StateTransformer>(
 
 #[must_use]
 pub fn is_first_build() -> impl for<'a> SideEffect<Api<'a> = bool> {
-    move |register: SideEffectRegistrar| {
+    |register: SideEffectRegistrar| {
         let has_built_before = register.register(value::<MutRef<_>>(false));
         let is_first_build = !*has_built_before;
         *has_built_before = true;
