@@ -5,7 +5,41 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.5.1 (2024-04-30)
+
+### New Features
+
+ - <csr-id-657889b54dc35152f1674eaead3c88c9ca5f9f42/> add convenience MultiSideEffectRegistrar
+
+### Performance
+
+ - <csr-id-81184d5645146bb19d8653477bb6256969f8261d/> remove unnecessary clone
+
+### Commit Statistics
+
+<csr-read-only-do-not-edit/>
+
+ - 2 commits contributed to the release.
+ - 25 days passed between releases.
+ - 2 commits were understood as [conventional](https://www.conventionalcommits.org).
+ - 1 unique issue was worked on: [#51](https://github.com/GregoryConrad/rearch-rs/issues/51)
+
+### Commit Details
+
+<csr-read-only-do-not-edit/>
+
+<details><summary>view details</summary>
+
+ * **[#51](https://github.com/GregoryConrad/rearch-rs/issues/51)**
+    - Add convenience MultiSideEffectRegistrar ([`657889b`](https://github.com/GregoryConrad/rearch-rs/commit/657889b54dc35152f1674eaead3c88c9ca5f9f42))
+ * **Uncategorized**
+    - Remove unnecessary clone ([`81184d5`](https://github.com/GregoryConrad/rearch-rs/commit/81184d5645146bb19d8653477bb6256969f8261d))
+</details>
+
 ## v0.5.0 (2024-04-05)
+
+<csr-id-f9ab7a02192bf7555b26623081a85769d973a7ac/>
+<csr-id-78eebcdd521a837d03427f52507691944155779c/>
 
 ### Chore
 
@@ -24,7 +58,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <csr-read-only-do-not-edit/>
 
- - 3 commits contributed to the release over the course of 45 calendar days.
+ - 4 commits contributed to the release over the course of 45 calendar days.
  - 80 days passed between releases.
  - 3 commits were understood as [conventional](https://www.conventionalcommits.org).
  - 1 unique issue was worked on: [#40](https://github.com/GregoryConrad/rearch-rs/issues/40)
@@ -38,6 +72,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
  * **[#40](https://github.com/GregoryConrad/rearch-rs/issues/40)**
     - Add lifetimes to FnOnce callbacks ([`0cca336`](https://github.com/GregoryConrad/rearch-rs/commit/0cca3369ce72c9ebbe5f5385dbe2e3e665fa2fd8))
  * **Uncategorized**
+    - Release rearch v0.10.0, rearch-effects v0.5.0, rearch-tokio v0.10.0 ([`850e353`](https://github.com/GregoryConrad/rearch-rs/commit/850e353051de1d5970b34e8c7d75114f5f24db34))
     - Bump version numbers ([`f9ab7a0`](https://github.com/GregoryConrad/rearch-rs/commit/f9ab7a02192bf7555b26623081a85769d973a7ac))
     - Fix latest nightly clippy lint ([`78eebcd`](https://github.com/GregoryConrad/rearch-rs/commit/78eebcdd521a837d03427f52507691944155779c))
 </details>
