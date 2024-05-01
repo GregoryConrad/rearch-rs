@@ -60,7 +60,7 @@ mod todo_db {
         CapsuleHandle { mut get, .. }: CapsuleHandle,
     ) -> impl CData + Fn(F) -> Result<R, redb::Error>
     where
-        F: FnOnce(ReadOnlyTable<'_, u128, &str>) -> Result<R, redb::Error>,
+        F: FnOnce(ReadOnlyTable<u128, &str>) -> Result<R, redb::Error>,
     {
         let db = Arc::clone(get.as_ref(db_capsule));
         move |with_table| {
@@ -74,7 +74,7 @@ mod todo_db {
         CapsuleHandle { mut get, .. }: CapsuleHandle,
     ) -> impl CData + Fn(F) -> Result<R, redb::Error>
     where
-        F: FnOnce(Table<'_, '_, u128, &str>) -> Result<R, redb::Error>,
+        F: FnOnce(Table<u128, &str>) -> Result<R, redb::Error>,
     {
         let db = Arc::clone(get.as_ref(db_capsule));
         move |with_table| {
