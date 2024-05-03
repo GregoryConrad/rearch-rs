@@ -47,7 +47,7 @@ fn scoped_index_key<T>(_: ViewHandle, index: T) -> T {
     index
 }
 
-fn list_item(ViewHandle { mut context, .. }: ViewHandle, _: ()) -> TerminatedView {
+fn list_item(ViewHandle { context, .. }: ViewHandle, _: ()) -> TerminatedView {
     let index = context.get(scoped_index_key::<usize>).unwrap();
     view().keyed(index).child(text, format!("{index}"))
 }
@@ -186,13 +186,13 @@ fn view() -> IntermediateView {
 
 // rows, column, and others can use render/layout primitives provided in views themselves
 
-fn text(ViewHandle { mut context, .. }: ViewHandle, str: String) -> TerminatedView {
+fn text(ViewHandle { context, .. }: ViewHandle, str: String) -> TerminatedView {
     let style = context.get(text_style);
     TerminatedView
 }
 #[derive(Clone, Default)]
 struct TextStyle;
-fn text_style(ViewHandle { mut context, .. }: ViewHandle, style: TextStyle) -> TextStyle {
+fn text_style(ViewHandle { context, .. }: ViewHandle, style: TextStyle) -> TextStyle {
     let parent = context.get(text_style);
     // merge style with one from parent
     style
