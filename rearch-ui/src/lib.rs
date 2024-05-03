@@ -63,7 +63,7 @@ struct ViewHandle<'side_effect> {
 }
 
 impl Context {
-    fn get<F, Ret, Props>(&mut self, scope: F) -> Option<Ret>
+    fn get<F, Ret, Props>(&self, scope: F) -> Option<Ret>
     where
         F: Fn(ViewHandle, Props) -> Ret,
         Ret: Clone,
