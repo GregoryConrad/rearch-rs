@@ -289,6 +289,7 @@ impl Drop for ListenerHandle {
 /// 1. `curr_side_effect_txn_modified_ids`
 /// 2. `nodes`
 /// 3. `data`
+///
 /// Skipping the locks we don't need, then we will never face a deadlock.
 #[derive(Default)]
 struct ContainerStore {

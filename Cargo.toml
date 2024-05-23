@@ -35,3 +35,8 @@ style = "warn"
 suspicious = "warn"
 clone_on_ref_ptr = "warn"
 unwrap_used = "warn"
+
+# TODO(GregoryConrad): remove the following once the nightly false positive is resolved
+# 1. https://github.com/rust-lang/rust-clippy/issues/12270
+# 2. https://github.com/rust-lang/rust-clippy/pull/12827
+lint_groups_priority = { level = "allow", priority = 1 }
