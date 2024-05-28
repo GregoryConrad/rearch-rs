@@ -1,7 +1,7 @@
 use rearch::{SideEffect, SideEffectRegistrar};
 use std::{
     any::Any,
-    cell::{OnceCell, RefCell},
+    cell::{Cell, OnceCell},
     sync::Arc,
 };
 
@@ -34,8 +34,8 @@ fn multi_impl<const LENGTH: usize>(register: SideEffectRegistrar) -> MultiSideEf
         mutation_runner(Box::new(move |data| mutation(data)));
     });
     MultiSideEffectRegistrar {
-        curr_index: RefCell::new(0),
-        curr_slice: RefCell::new(curr_slice),
+        curr_index: Cell::new(0),
+        curr_slice: Cell::new(curr_slice),
         multi_mutation_runner,
         run_txn,
     }
@@ -46,9 +46,9 @@ fn multi_impl<const LENGTH: usize>(register: SideEffectRegistrar) -> MultiSideEf
 /// Provided by [`multi`].
 #[allow(clippy::module_name_repetitions)] // re-exported at crate level (not from module)
 pub struct MultiSideEffectRegistrar<'a> {
-    // NOTE: the RefCells are needed in order to support register(&self) (versus &mut self)
-    curr_index: RefCell<usize>,
-    curr_slice: RefCell<&'a mut [OnceCell<Box<dyn Any + Send>>]>,
+    // NOTE: the Cells are needed in order to support register(&self) (versus &mut self)
+    curr_index: Cell<usize>,
+    curr_slice: Cell<&'a mut [OnceCell<Box<dyn Any + Send>>]>,
     multi_mutation_runner: MultiSideEffectStateMutationRunner,
     run_txn: SideEffectTxnRunner,
 }
@@ -60,17 +60,16 @@ impl<'a> MultiSideEffectRegistrar<'a> {
     /// Panics when the supplied length to [`multi`] is exceeded
     /// by registering too many side effects.
     pub fn register<S: SideEffect>(&'a self, effect: S) -> S::Api<'a> {
-        let (curr_data, rest_slice) = std::mem::take(&mut *self.curr_slice.borrow_mut())
-            .split_first_mut()
-            .unwrap_or_else(|| {
+        let (curr_data, rest_slice) =
+            self.curr_slice.take().split_first_mut().unwrap_or_else(|| {
                 panic!(
                     "multi was not given a long enough length; it should be at least {}",
-                    *self.curr_index.borrow() + 1
+                    self.curr_index.get() + 1
                 );
             });
 
         let mutation_runner = {
-            let curr_index = *self.curr_index.borrow();
+            let curr_index = self.curr_index.get();
             let multi_mutation_runner = Arc::clone(&self.multi_mutation_runner);
             Arc::new(move |mutation: SideEffectStateMutation| {
                 multi_mutation_runner(Box::new(|multi_data_slice| {
@@ -82,8 +81,8 @@ impl<'a> MultiSideEffectRegistrar<'a> {
             })
         };
 
-        *self.curr_index.borrow_mut() += 1;
-        *self.curr_slice.borrow_mut() = rest_slice;
+        self.curr_index.set(self.curr_index.get() + 1);
+        self.curr_slice.replace(rest_slice);
 
         SideEffectRegistrar::new(curr_data, mutation_runner, Arc::clone(&self.run_txn))
             .register(effect)
