@@ -10,6 +10,10 @@ pub use multi::*;
 mod effect_lifetime_fixers;
 use effect_lifetime_fixers::{EffectLifetimeFixer0, EffectLifetimeFixer1, EffectLifetimeFixer2};
 
+/// A way to re-use the same exact side effect code while providing a different [`SideEffect::Api`]
+/// based on the data you have and the data you want in return (such as a [`Clone`] or a ref).
+///
+/// See the implementors of this trait of the various state transformers you can use.
 pub trait StateTransformer: Send + 'static {
     type Input;
     fn from_input(input: Self::Input) -> Self;
@@ -23,10 +27,15 @@ pub trait StateTransformer: Send + 'static {
 
 type SideEffectMutation<'f, ST> = Box<dyn 'f + FnOnce(&mut <ST as StateTransformer>::Inner)>;
 
+/// A no-op side effect that specifies non-idempotence.
+///
+/// Useful so that a capsule can be treated as a listener/will not get
+/// idempotent garbage collected from a container.
 // NOTE: returns (), the no-op side effect
 #[must_use]
 pub fn as_listener() -> impl for<'a> SideEffect<Api<'a> = ()> {}
 
+/// Analogous to [`SideEffectRegistrar::raw`], but uses a [`StateTransformer`] to specify the api.
 pub fn raw<ST: StateTransformer>(
     initial: ST::Input,
 ) -> impl for<'a> SideEffect<
@@ -48,6 +57,8 @@ pub fn raw<ST: StateTransformer>(
     })
 }
 
+/// Similar to `useState` from React hooks.
+/// Provides a copy of some state and a way to set that state via a callback.
 pub fn state<ST: StateTransformer>(
     initial: ST::Input,
 ) -> impl for<'a> SideEffect<Api<'a> = (ST::Output<'a>, impl CData + Fn(ST::Inner))> {
@@ -60,6 +71,7 @@ pub fn state<ST: StateTransformer>(
     })
 }
 
+/// Provides the same given value across builds.
 pub fn value<ST: StateTransformer>(
     value: ST::Input,
 ) -> impl for<'a> SideEffect<Api<'a> = ST::Output<'a>> {
@@ -68,6 +80,7 @@ pub fn value<ST: StateTransformer>(
     })
 }
 
+/// Provides whether or not this is the first build being called.
 #[must_use]
 pub fn is_first_build() -> impl for<'a> SideEffect<Api<'a> = bool> {
     |register: SideEffectRegistrar| {
@@ -78,7 +91,7 @@ pub fn is_first_build() -> impl for<'a> SideEffect<Api<'a> = bool> {
     }
 }
 
-/// Models the state reducer pattern via side effects.
+/// Models the state reducer pattern via side effects (similar to `useReducer` from React hooks).
 ///
 /// This should normally *not* be used with [`MutRef`].
 pub fn reducer<ST: StateTransformer, Action, Reducer>(
@@ -177,6 +190,8 @@ mod tests {
     use rearch::{CapsuleHandle, Container};
     use std::sync::atomic::{AtomicU8, Ordering};
 
+    // NOTE: raw side effect is effectively tested via combination of the other side effects
+
     #[allow(clippy::needless_pass_by_value)]
     fn assert_type<Expected>(_actual: Expected) {}
 
@@ -195,7 +210,6 @@ mod tests {
         Container::new().read(dummy_capsule);
     }
 
-    #[cfg(feature = "lazy-state-transformers")]
     #[test]
     fn lazy_transformer_output_types() {
         fn dummy_capsule(CapsuleHandle { register, .. }: CapsuleHandle) {
@@ -211,7 +225,13 @@ mod tests {
         Container::new().read(dummy_capsule);
     }
 
-    // NOTE: raw side effect is effectively tested via combination of the other side effects
+    #[test]
+    fn lazy_transformer_invokes_init_fn() {
+        fn lazy_transformer_capsule(CapsuleHandle { register, .. }: CapsuleHandle) -> u8 {
+            register.register(value::<LazyCloned<_>>(|| 123))
+        }
+        assert_eq!(Container::new().read(lazy_transformer_capsule), 123);
+    }
 
     #[test]
     fn as_listener_gets_changes() {
