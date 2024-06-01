@@ -19,4 +19,4 @@ workspace = true
 [dependencies]
 im = "15.1.0"
 rearch = { workspace = true }
-rearch-effects = { workspace = true, features = ["lazy-state-transformers"] }
+rearch-effects = { workspace = true }
