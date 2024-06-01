@@ -87,21 +87,26 @@ where
     }
 }
 
+/// Used to build a mocked [`CapsuleReader`] for use in unit testing capsules.
 #[derive(Clone, Default)]
 pub struct MockCapsuleReaderBuilder(HashMap<CapsuleId, Arc<dyn Any + Send + Sync>>);
 
 impl MockCapsuleReaderBuilder {
+    /// Creates a new [`MockCapsuleReaderBuilder`].
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Mocks the value of the given `capsule` to `data`.
     #[must_use]
     pub fn set<C: Capsule>(mut self, capsule: &C, data: C::Data) -> Self {
         self.0.insert(capsule.id(), Arc::new(data));
         self
     }
 
+    /// Builds the final [`CapsuleReader`] with all of the supplied mocks
+    /// from [`MockCapsuleReaderBuilder::set`].
     #[must_use]
     pub fn build(self) -> CapsuleReader<'static, 'static> {
         CapsuleReader(InternalCapsuleReader::Mock { mocks: self.0 })
