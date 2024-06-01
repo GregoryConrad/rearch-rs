@@ -17,4 +17,4 @@ readme = "README.md"
 workspace = true
 
 [dependencies]
-rearch = { workspace = true }
+rearch = { version = "0.10.1", path = "../rearch" }
