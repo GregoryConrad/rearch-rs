@@ -17,5 +17,5 @@ readme.workspace = true
 workspace = true
 
 [dependencies]
-rearch = { workspace = true }
-rearch-effects = { workspace = true }
+rearch = { path = "../../rearch" }
+rearch-effects = { path = "../../rearch-effects" }

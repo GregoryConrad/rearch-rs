@@ -17,7 +17,7 @@ readme.workspace = true
 workspace = true
 
 [dependencies]
-rearch = { workspace = true }
+rearch = { path = "../../rearch" }
 axum = "0.7.5"
 redb = "2.1.0"
 serde = { version = "1.0.199", features = ["derive"] }

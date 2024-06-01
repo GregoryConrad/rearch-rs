@@ -17,4 +17,4 @@ readme.workspace = true
 workspace = true
 
 [dependencies]
-rearch = { workspace = true }
+rearch = { path = "../../rearch" }

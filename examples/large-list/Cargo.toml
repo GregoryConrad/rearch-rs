@@ -18,5 +18,5 @@ workspace = true
 
 [dependencies]
 im = "15.1.0"
-rearch = { workspace = true }
-rearch-effects = { workspace = true }
+rearch = { path = "../../rearch" }
+rearch-effects = { path = "../../rearch-effects" }
