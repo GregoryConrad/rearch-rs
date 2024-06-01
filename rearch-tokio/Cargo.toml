@@ -1,6 +1,6 @@
 [package]
 name = "rearch-tokio"
-version = "0.10.1"
+version = "0.10.2"
 edition.workspace = true
 license.workspace = true
 description.workspace = true
@@ -16,6 +16,6 @@ readme.workspace = true
 workspace = true
 
 [dependencies]
-rearch = { version = "0.10.1", path = "../rearch" }
-rearch-effects = { version = "0.5.1", path = "../rearch-effects" }
+rearch = { version = "^0.10.2", path = "../rearch" }
+rearch-effects = { version = "^0.5.2", path = "../rearch-effects" }
 tokio = { version = "1.36.0", default-features = false, features = ["rt"] }

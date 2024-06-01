@@ -1,6 +1,46 @@
 
 
+## v0.10.2 (2024-06-01)
+
+### Documentation
+
+ - <csr-id-7999241c7818892451fc727eaf504eb64b7c862f/> add doc comments to more API elements
+
+### Other
+
+ - <csr-id-12813bc4b968aecd6f6581018627abf210c8f1a7/> fix and workaround latest nightly clippy lints
+
+### Refactor
+
+ - <csr-id-52f65a8b0cdb04e79a372a252cb48d21258ec670/> list out deps inline to be more idiomatic
+
+### Commit Statistics
+
+<csr-read-only-do-not-edit/>
+
+ - 3 commits contributed to the release over the course of 9 calendar days.
+ - 34 days passed between releases.
+ - 3 commits were understood as [conventional](https://www.conventionalcommits.org).
+ - 1 unique issue was worked on: [#55](https://github.com/GregoryConrad/rearch-rs/issues/55)
+
+### Commit Details
+
+<csr-read-only-do-not-edit/>
+
+<details><summary>view details</summary>
+
+ * **[#55](https://github.com/GregoryConrad/rearch-rs/issues/55)**
+    - List out deps inline to be more idiomatic ([`52f65a8`](https://github.com/GregoryConrad/rearch-rs/commit/52f65a8b0cdb04e79a372a252cb48d21258ec670))
+ * **Uncategorized**
+    - Add doc comments to more API elements ([`7999241`](https://github.com/GregoryConrad/rearch-rs/commit/7999241c7818892451fc727eaf504eb64b7c862f))
+    - Fix and workaround latest nightly clippy lints ([`12813bc`](https://github.com/GregoryConrad/rearch-rs/commit/12813bc4b968aecd6f6581018627abf210c8f1a7))
+</details>
+
 ## v0.10.1 (2024-04-28)
+
+<csr-id-3992390b4874ecaca635b7397e40f636b83a5b33/>
+<csr-id-b7c3fe566d76f431afac3195a8eb1bc35ca1149c/>
+<csr-id-80b3aa4c61b27131feba2567a1e3bb4f82dc5457/>
 
 ### Chore
 
@@ -29,7 +69,7 @@
 
 <csr-read-only-do-not-edit/>
 
- - 6 commits contributed to the release over the course of 21 calendar days.
+ - 7 commits contributed to the release over the course of 21 calendar days.
  - 23 days passed between releases.
  - 6 commits were understood as [conventional](https://www.conventionalcommits.org).
  - 4 unique issues were worked on: [#42](https://github.com/GregoryConrad/rearch-rs/issues/42), [#43](https://github.com/GregoryConrad/rearch-rs/issues/43), [#46](https://github.com/GregoryConrad/rearch-rs/issues/46), [#49](https://github.com/GregoryConrad/rearch-rs/issues/49)
@@ -49,6 +89,7 @@
  * **[#49](https://github.com/GregoryConrad/rearch-rs/issues/49)**
     - Add Container::read_ref API ([`4d4ee1c`](https://github.com/GregoryConrad/rearch-rs/commit/4d4ee1c7cc524c47c71dee375ba577e8cee4b637))
  * **Uncategorized**
+    - Release rearch v0.10.1, rearch-tokio v0.10.1 ([`d6fdd21`](https://github.com/GregoryConrad/rearch-rs/commit/d6fdd214f49810c9079b6d370a80c1b264923980))
     - Remove unnecessary heap allocation ([`92b4810`](https://github.com/GregoryConrad/rearch-rs/commit/92b4810886cd632a29b2fc9d0e5aa98913faa99d))
     - Specify rust-version in rearch Cargo.toml ([`3992390`](https://github.com/GregoryConrad/rearch-rs/commit/3992390b4874ecaca635b7397e40f636b83a5b33))
 </details>

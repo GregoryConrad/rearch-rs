@@ -5,6 +5,39 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.5.2 (2024-06-01)
+
+### Performance
+
+ - <csr-id-2e072440d6b7ac7baaf2731576e5427387daa6ae/> switch multi side effect to Cell from RefCell
+
+### Refactor
+
+ - <csr-id-52f65a8b0cdb04e79a372a252cb48d21258ec670/> list out deps inline to be more idiomatic
+ - <csr-id-0c264cfbbd49b155880aef45465eb54125511d1a/> remove once_cell dependency for lazy transformers
+
+### Commit Statistics
+
+<csr-read-only-do-not-edit/>
+
+ - 3 commits contributed to the release over the course of 4 calendar days.
+ - 31 days passed between releases.
+ - 3 commits were understood as [conventional](https://www.conventionalcommits.org).
+ - 1 unique issue was worked on: [#55](https://github.com/GregoryConrad/rearch-rs/issues/55)
+
+### Commit Details
+
+<csr-read-only-do-not-edit/>
+
+<details><summary>view details</summary>
+
+ * **[#55](https://github.com/GregoryConrad/rearch-rs/issues/55)**
+    - List out deps inline to be more idiomatic ([`52f65a8`](https://github.com/GregoryConrad/rearch-rs/commit/52f65a8b0cdb04e79a372a252cb48d21258ec670))
+ * **Uncategorized**
+    - Remove once_cell dependency for lazy transformers ([`0c264cf`](https://github.com/GregoryConrad/rearch-rs/commit/0c264cfbbd49b155880aef45465eb54125511d1a))
+    - Switch multi side effect to Cell from RefCell ([`2e07244`](https://github.com/GregoryConrad/rearch-rs/commit/2e072440d6b7ac7baaf2731576e5427387daa6ae))
+</details>
+
 ## v0.5.1 (2024-04-30)
 
 ### New Features
@@ -19,7 +52,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <csr-read-only-do-not-edit/>
 
- - 2 commits contributed to the release.
+ - 3 commits contributed to the release.
  - 25 days passed between releases.
  - 2 commits were understood as [conventional](https://www.conventionalcommits.org).
  - 1 unique issue was worked on: [#51](https://github.com/GregoryConrad/rearch-rs/issues/51)
@@ -33,6 +66,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
  * **[#51](https://github.com/GregoryConrad/rearch-rs/issues/51)**
     - Add convenience MultiSideEffectRegistrar ([`657889b`](https://github.com/GregoryConrad/rearch-rs/commit/657889b54dc35152f1674eaead3c88c9ca5f9f42))
  * **Uncategorized**
+    - Release rearch-effects v0.5.1 ([`153738f`](https://github.com/GregoryConrad/rearch-rs/commit/153738fd5554ba68b74f5b418487e3c2bc44fa05))
     - Remove unnecessary clone ([`81184d5`](https://github.com/GregoryConrad/rearch-rs/commit/81184d5645146bb19d8653477bb6256969f8261d))
 </details>
 

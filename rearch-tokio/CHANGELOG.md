@@ -1,5 +1,30 @@
 
 
+## v0.10.2 (2024-06-01)
+
+### Refactor
+
+ - <csr-id-52f65a8b0cdb04e79a372a252cb48d21258ec670/> list out deps inline to be more idiomatic
+
+### Commit Statistics
+
+<csr-read-only-do-not-edit/>
+
+ - 1 commit contributed to the release.
+ - 34 days passed between releases.
+ - 1 commit was understood as [conventional](https://www.conventionalcommits.org).
+ - 1 unique issue was worked on: [#55](https://github.com/GregoryConrad/rearch-rs/issues/55)
+
+### Commit Details
+
+<csr-read-only-do-not-edit/>
+
+<details><summary>view details</summary>
+
+ * **[#55](https://github.com/GregoryConrad/rearch-rs/issues/55)**
+    - List out deps inline to be more idiomatic ([`52f65a8`](https://github.com/GregoryConrad/rearch-rs/commit/52f65a8b0cdb04e79a372a252cb48d21258ec670))
+</details>
+
 ## v0.10.1 (2024-04-28)
 
 ### Performance
@@ -10,7 +35,7 @@
 
 <csr-read-only-do-not-edit/>
 
- - 1 commit contributed to the release over the course of 7 calendar days.
+ - 2 commits contributed to the release over the course of 7 calendar days.
  - 23 days passed between releases.
  - 1 commit was understood as [conventional](https://www.conventionalcommits.org).
  - 1 unique issue was worked on: [#46](https://github.com/GregoryConrad/rearch-rs/issues/46)
@@ -23,6 +48,8 @@
 
  * **[#46](https://github.com/GregoryConrad/rearch-rs/issues/46)**
     - Remove concread dependency ([`6784ff3`](https://github.com/GregoryConrad/rearch-rs/commit/6784ff381856be8ec5cc3a8864928edb53101438))
+ * **Uncategorized**
+    - Release rearch v0.10.1, rearch-tokio v0.10.1 ([`d6fdd21`](https://github.com/GregoryConrad/rearch-rs/commit/d6fdd214f49810c9079b6d370a80c1b264923980))
 </details>
 
 ## v0.10.0 (2024-04-05)

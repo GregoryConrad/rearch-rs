@@ -1,6 +1,6 @@
 [package]
 name = "rearch"
-version = "0.10.1"
+version = "0.10.2"
 rust-version = "1.75"
 edition.workspace = true
 license.workspace = true
