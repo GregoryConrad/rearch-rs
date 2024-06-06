@@ -1,6 +1,3 @@
-#![allow(clippy::multiple_crate_versions)]
-// TODO(GregoryConrad): remove multiple_crate_versions from allowlist once tokio deps are updated
-
 use effects::{MutRef, StateTransformer};
 use rearch::{CData, SideEffect, SideEffectRegistrar};
 use rearch_effects as effects;
