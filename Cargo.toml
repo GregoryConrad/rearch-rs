@@ -34,3 +34,6 @@ unwrap_used = "warn"
 # 1. https://github.com/rust-lang/rust-clippy/issues/12270
 # 2. https://github.com/rust-lang/rust-clippy/pull/12827
 lint_groups_priority = { level = "allow", priority = 1 }
+
+# TODO(GregoryConrad): remove the following once tokio's deps are updated.
+multiple_crate_versions = { level = "allow", priority = 1}
