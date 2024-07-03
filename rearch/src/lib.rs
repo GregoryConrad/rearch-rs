@@ -497,11 +497,7 @@ impl CapsuleManager {
 }
 
 #[cfg(test)]
-#[allow(
-    clippy::unwrap_used,
-    clippy::too_many_lines,
-    clippy::cognitive_complexity
-)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use crate::*;
 
@@ -745,12 +741,16 @@ mod tests {
     }
 
     #[test]
+    #[allow(
+        clippy::needless_pass_by_value,
+        clippy::too_many_lines,
+        clippy::cognitive_complexity
+    )]
     fn eq_check_skips_unneeded_rebuilds() {
         use std::{any::TypeId, collections::HashMap};
 
         static BUILDS: Mutex<OnceCell<HashMap<TypeId, u32>>> = Mutex::new(OnceCell::new());
 
-        #[allow(clippy::needless_pass_by_value)]
         fn increment_build_count<C: Capsule>(_capsule: C) {
             let mut cell = BUILDS.lock();
             cell.get_or_init(HashMap::new);
@@ -758,7 +758,7 @@ mod tests {
             *entry.or_default() += 1;
             drop(cell);
         }
-        #[allow(clippy::needless_pass_by_value)]
+
         fn get_build_count<C: Capsule>(_capsule: C) -> u32 {
             *BUILDS
                 .lock()
@@ -975,6 +975,7 @@ mod tests {
     //
     // C, D, E, G, H are idempotent. A, B, F are not.
     #[test]
+    #[allow(clippy::cognitive_complexity)]
     fn complex_dependency_graph() {
         fn stateful_a(CapsuleHandle { register, .. }: CapsuleHandle) -> (u8, impl CData + Fn(u8)) {
             register.register(effects::cloned_state(0))
@@ -1032,28 +1033,28 @@ mod tests {
 
         let txn = container.0.read_txn();
         assert!(txn.try_read(&stateful_a).is_some());
-        assert_eq!(txn.try_read(&a).unwrap(), 0);
-        assert_eq!(txn.try_read(&b).unwrap(), 1);
-        assert_eq!(txn.try_read(&c).unwrap(), 2);
-        assert_eq!(txn.try_read(&d).unwrap(), 2);
-        assert_eq!(txn.try_read(&e).unwrap(), 1);
-        assert_eq!(txn.try_read(&f).unwrap(), 1);
-        assert_eq!(txn.try_read(&g).unwrap(), 3);
-        assert_eq!(txn.try_read(&h).unwrap(), 1);
+        assert_eq!(txn.try_read(&a), Some(0));
+        assert_eq!(txn.try_read(&b), Some(1));
+        assert_eq!(txn.try_read(&c), Some(2));
+        assert_eq!(txn.try_read(&d), Some(2));
+        assert_eq!(txn.try_read(&e), Some(1));
+        assert_eq!(txn.try_read(&f), Some(1));
+        assert_eq!(txn.try_read(&g), Some(3));
+        assert_eq!(txn.try_read(&h), Some(1));
         drop(txn);
 
         container.read(stateful_a).1(10);
 
         let txn = container.0.read_txn();
         assert!(txn.try_read(&stateful_a).is_some());
-        assert_eq!(txn.try_read(&a).unwrap(), 10);
-        assert_eq!(txn.try_read(&b).unwrap(), 11);
+        assert_eq!(txn.try_read(&a), Some(10));
+        assert_eq!(txn.try_read(&b), Some(11));
         assert_eq!(txn.try_read(&c), None);
         assert_eq!(txn.try_read(&d), None);
-        assert_eq!(txn.try_read(&e).unwrap(), 11);
-        assert_eq!(txn.try_read(&f).unwrap(), 11);
+        assert_eq!(txn.try_read(&e), Some(11));
+        assert_eq!(txn.try_read(&f), Some(11));
         assert_eq!(txn.try_read(&g), None);
-        assert_eq!(txn.try_read(&h).unwrap(), 1);
+        assert_eq!(txn.try_read(&h), Some(1));
         drop(txn);
     }
 
