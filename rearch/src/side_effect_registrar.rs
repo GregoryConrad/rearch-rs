@@ -39,7 +39,10 @@ impl<'a> SideEffectRegistrar<'a> {
 
 impl<'a> SideEffectRegistrar<'a> {
     /// The basic building block for all side effects.
-    #[allow(clippy::missing_panics_doc)] // false positive
+    ///
+    /// # Panics
+    /// Panics when the supplied type `T` changes between builds.
+    /// Ensure T remains the same across builds (e.g., by calling this function unconditionally).
     pub fn raw<T>(
         self,
         initial: T,

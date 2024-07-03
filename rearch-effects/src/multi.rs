@@ -44,7 +44,10 @@ fn multi_impl<const LENGTH: usize>(register: SideEffectRegistrar) -> MultiSideEf
 /// Allows you to register multiple side effects _sequentially_,
 /// unlike the standard [`SideEffectRegistrar`].
 /// Provided by [`multi`].
-#[allow(clippy::module_name_repetitions)] // re-exported at crate level (not from module)
+#[expect(
+    clippy::module_name_repetitions,
+    reason = "https://github.com/rust-lang/rust-clippy/issues/8524"
+)]
 pub struct MultiSideEffectRegistrar<'a> {
     // NOTE: the Cells are needed in order to support register(&self) (versus &mut self)
     curr_index: Cell<usize>,
