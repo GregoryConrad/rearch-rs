@@ -7,6 +7,9 @@ pub use state_transformers::*;
 mod multi;
 pub use multi::*;
 
+mod overridable_capsule;
+pub use overridable_capsule::{overridable_capsule, OverridableCapsule};
+
 mod effect_lifetime_fixers;
 use effect_lifetime_fixers::{EffectLifetimeFixer0, EffectLifetimeFixer1, EffectLifetimeFixer2};
 

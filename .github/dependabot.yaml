@@ -36,7 +36,3 @@ updates:
     directory: "/examples/count-bench"
     schedule:
       interval: weekly
-  - package-ecosystem: cargo
-    directory: "/examples/override-capsules"
-    schedule:
-      interval: weekly
