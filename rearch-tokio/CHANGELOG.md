@@ -1,6 +1,33 @@
 
 
+## v0.10.3 (2024-08-04)
+
+### Style
+
+ - <csr-id-d5dd42bb6bc17037ba8a7b46e59245509851fa49/> clean up the workaround for multiple crates
+
+### Commit Statistics
+
+<csr-read-only-do-not-edit/>
+
+ - 1 commit contributed to the release over the course of 59 calendar days.
+ - 63 days passed between releases.
+ - 1 commit was understood as [conventional](https://www.conventionalcommits.org).
+ - 1 unique issue was worked on: [#57](https://github.com/GregoryConrad/rearch-rs/issues/57)
+
+### Commit Details
+
+<csr-read-only-do-not-edit/>
+
+<details><summary>view details</summary>
+
+ * **[#57](https://github.com/GregoryConrad/rearch-rs/issues/57)**
+    - Clean up the workaround for multiple crates ([`d5dd42b`](https://github.com/GregoryConrad/rearch-rs/commit/d5dd42bb6bc17037ba8a7b46e59245509851fa49))
+</details>
+
 ## v0.10.2 (2024-06-01)
+
+<csr-id-52f65a8b0cdb04e79a372a252cb48d21258ec670/>
 
 ### Refactor
 
@@ -10,7 +37,7 @@
 
 <csr-read-only-do-not-edit/>
 
- - 1 commit contributed to the release.
+ - 2 commits contributed to the release.
  - 34 days passed between releases.
  - 1 commit was understood as [conventional](https://www.conventionalcommits.org).
  - 1 unique issue was worked on: [#55](https://github.com/GregoryConrad/rearch-rs/issues/55)
@@ -23,6 +50,8 @@
 
  * **[#55](https://github.com/GregoryConrad/rearch-rs/issues/55)**
     - List out deps inline to be more idiomatic ([`52f65a8`](https://github.com/GregoryConrad/rearch-rs/commit/52f65a8b0cdb04e79a372a252cb48d21258ec670))
+ * **Uncategorized**
+    - Release rearch v0.10.2, rearch-effects v0.5.2, rearch-tokio v0.10.2 ([`27c6c41`](https://github.com/GregoryConrad/rearch-rs/commit/27c6c41176ecbdb8f2b5903bd3c8ae79f171ae01))
 </details>
 
 ## v0.10.1 (2024-04-28)

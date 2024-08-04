@@ -5,7 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.5.3 (2024-08-04)
+
+### New Features
+
+ - <csr-id-5b5391f81f7dd7839a3bcc1df396dcb93d359228/> add `overridable_capsule` side effect
+
+### Commit Statistics
+
+<csr-read-only-do-not-edit/>
+
+ - 1 commit contributed to the release.
+ - 63 days passed between releases.
+ - 1 commit was understood as [conventional](https://www.conventionalcommits.org).
+ - 1 unique issue was worked on: [#64](https://github.com/GregoryConrad/rearch-rs/issues/64)
+
+### Commit Details
+
+<csr-read-only-do-not-edit/>
+
+<details><summary>view details</summary>
+
+ * **[#64](https://github.com/GregoryConrad/rearch-rs/issues/64)**
+    - Add `overridable_capsule` side effect ([`5b5391f`](https://github.com/GregoryConrad/rearch-rs/commit/5b5391f81f7dd7839a3bcc1df396dcb93d359228))
+</details>
+
 ## v0.5.2 (2024-06-01)
+
+<csr-id-52f65a8b0cdb04e79a372a252cb48d21258ec670/>
+<csr-id-0c264cfbbd49b155880aef45465eb54125511d1a/>
 
 ### Performance
 
@@ -20,7 +48,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <csr-read-only-do-not-edit/>
 
- - 3 commits contributed to the release over the course of 4 calendar days.
+ - 4 commits contributed to the release over the course of 4 calendar days.
  - 31 days passed between releases.
  - 3 commits were understood as [conventional](https://www.conventionalcommits.org).
  - 1 unique issue was worked on: [#55](https://github.com/GregoryConrad/rearch-rs/issues/55)
@@ -34,6 +62,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
  * **[#55](https://github.com/GregoryConrad/rearch-rs/issues/55)**
     - List out deps inline to be more idiomatic ([`52f65a8`](https://github.com/GregoryConrad/rearch-rs/commit/52f65a8b0cdb04e79a372a252cb48d21258ec670))
  * **Uncategorized**
+    - Release rearch v0.10.2, rearch-effects v0.5.2, rearch-tokio v0.10.2 ([`27c6c41`](https://github.com/GregoryConrad/rearch-rs/commit/27c6c41176ecbdb8f2b5903bd3c8ae79f171ae01))
     - Remove once_cell dependency for lazy transformers ([`0c264cf`](https://github.com/GregoryConrad/rearch-rs/commit/0c264cfbbd49b155880aef45465eb54125511d1a))
     - Switch multi side effect to Cell from RefCell ([`2e07244`](https://github.com/GregoryConrad/rearch-rs/commit/2e072440d6b7ac7baaf2731576e5427387daa6ae))
 </details>
