@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.6.0 (2024-08-07)
+
+### Bug Fixes (BREAKING)
+
+ - <csr-id-8ca7fa7534c98c6b1e30e0adfd6d59259351a532/> prevent possible `OverridableCapsule` API misuse
+
+### Commit Statistics
+
+<csr-read-only-do-not-edit/>
+
+ - 1 commit contributed to the release.
+ - 2 days passed between releases.
+ - 1 commit was understood as [conventional](https://www.conventionalcommits.org).
+ - 1 unique issue was worked on: [#65](https://github.com/GregoryConrad/rearch-rs/issues/65)
+
+### Commit Details
+
+<csr-read-only-do-not-edit/>
+
+<details><summary>view details</summary>
+
+ * **[#65](https://github.com/GregoryConrad/rearch-rs/issues/65)**
+    - Prevent possible `OverridableCapsule` API misuse ([`8ca7fa7`](https://github.com/GregoryConrad/rearch-rs/commit/8ca7fa7534c98c6b1e30e0adfd6d59259351a532))
+</details>
+
 ## v0.5.3 (2024-08-04)
 
 ### New Features
@@ -15,7 +40,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <csr-read-only-do-not-edit/>
 
- - 1 commit contributed to the release.
+ - 2 commits contributed to the release.
  - 63 days passed between releases.
  - 1 commit was understood as [conventional](https://www.conventionalcommits.org).
  - 1 unique issue was worked on: [#64](https://github.com/GregoryConrad/rearch-rs/issues/64)
@@ -28,6 +53,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
  * **[#64](https://github.com/GregoryConrad/rearch-rs/issues/64)**
     - Add `overridable_capsule` side effect ([`5b5391f`](https://github.com/GregoryConrad/rearch-rs/commit/5b5391f81f7dd7839a3bcc1df396dcb93d359228))
+ * **Uncategorized**
+    - Release rearch-effects v0.5.3, rearch-tokio v0.10.3 ([`74a2e35`](https://github.com/GregoryConrad/rearch-rs/commit/74a2e35ce04441dc74d2cee16085d070d37c5c0c))
 </details>
 
 ## v0.5.2 (2024-06-01)
