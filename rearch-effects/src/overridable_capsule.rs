@@ -76,9 +76,14 @@ pub struct OverridableCapsule<Data> {
 impl<Data> OverridableCapsule<Data> {
     /// Overrides the [`OverridableCapsule`] to point to the supplied [`Capsule`].
     ///
-    /// Note that this function mutates the underlying [`rearch::Container`], and not `self`,
+    /// Note that this function mutates the underlying [`rearch::Container`] (and not `self`),
     /// so you must call [`rearch::Container::read`] again for the latest value.
-    pub fn set<C>(&self, capsule: C)
+    ///
+    /// As you shouldn't be using an [`OverridableCapsule`] after calling this method
+    /// (to prevent using stale data), this method consumes `self` to prevent possible API misuse.
+    /// If, for some reason, you _do_ want to use the outdated capsule after calling this method,
+    /// call [`OverridableCapsule::clone`] first.
+    pub fn set<C>(self, capsule: C)
     where
         C: Capsule<Data = Data> + Sync,
     {
