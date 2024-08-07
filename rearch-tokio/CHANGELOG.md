@@ -1,6 +1,35 @@
 
 
+## v0.10.4 (2024-08-07)
+
+### Bug Fixes
+
+ - <csr-id-2e5fa1633fb8c63d6fb2dc7b4dee66b8cba80b8f/> rollback the tokio version to 10.x
+
+### Commit Statistics
+
+<csr-read-only-do-not-edit/>
+
+ - 2 commits contributed to the release.
+ - 3 days passed between releases.
+ - 1 commit was understood as [conventional](https://www.conventionalcommits.org).
+ - 1 unique issue was worked on: [#66](https://github.com/GregoryConrad/rearch-rs/issues/66)
+
+### Commit Details
+
+<csr-read-only-do-not-edit/>
+
+<details><summary>view details</summary>
+
+ * **[#66](https://github.com/GregoryConrad/rearch-rs/issues/66)**
+    - Rollback the tokio version to 10.x ([`2e5fa16`](https://github.com/GregoryConrad/rearch-rs/commit/2e5fa1633fb8c63d6fb2dc7b4dee66b8cba80b8f))
+ * **Uncategorized**
+    - Release rearch-effects v0.6.0, safety bump rearch-tokio v0.11.0 ([`ba93161`](https://github.com/GregoryConrad/rearch-rs/commit/ba93161967fe7e4633f1e99d0fbec10b828091a6))
+</details>
+
 ## v0.10.3 (2024-08-04)
+
+<csr-id-d5dd42bb6bc17037ba8a7b46e59245509851fa49/>
 
 ### Style
 
@@ -10,7 +39,7 @@
 
 <csr-read-only-do-not-edit/>
 
- - 1 commit contributed to the release over the course of 59 calendar days.
+ - 2 commits contributed to the release over the course of 59 calendar days.
  - 63 days passed between releases.
  - 1 commit was understood as [conventional](https://www.conventionalcommits.org).
  - 1 unique issue was worked on: [#57](https://github.com/GregoryConrad/rearch-rs/issues/57)
@@ -23,6 +52,8 @@
 
  * **[#57](https://github.com/GregoryConrad/rearch-rs/issues/57)**
     - Clean up the workaround for multiple crates ([`d5dd42b`](https://github.com/GregoryConrad/rearch-rs/commit/d5dd42bb6bc17037ba8a7b46e59245509851fa49))
+ * **Uncategorized**
+    - Release rearch-effects v0.5.3, rearch-tokio v0.10.3 ([`74a2e35`](https://github.com/GregoryConrad/rearch-rs/commit/74a2e35ce04441dc74d2cee16085d070d37c5c0c))
 </details>
 
 ## v0.10.2 (2024-06-01)
