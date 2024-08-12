@@ -1,11 +1,11 @@
 [package]
 name = "rearch-effects"
 version = "0.6.0"
+documentation = "https://docs.rs/rearch-effects"
 edition.workspace = true
 license.workspace = true
 description.workspace = true
 homepage.workspace = true
-documentation.workspace = true
 repository.workspace = true
 keywords.workspace = true
 categories.workspace = true

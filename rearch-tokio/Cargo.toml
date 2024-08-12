@@ -1,11 +1,11 @@
 [package]
 name = "rearch-tokio"
 version = "0.10.4"
+documentation = "https://docs.rs/rearch-tokio"
 edition.workspace = true
 license.workspace = true
 description.workspace = true
 homepage.workspace = true
-documentation.workspace = true
 repository.workspace = true
 keywords.workspace = true
 categories.workspace = true
