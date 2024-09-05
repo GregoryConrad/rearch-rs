@@ -69,6 +69,15 @@ assert_eq!(count, 1);
 assert_eq!(count_plus_one, 2);
 ```
 
+> [!NOTE]
+> The syntax used in the example above requires nightly for `unboxed_closures` and `fn_traits`,
+> which is feature-gated under the `experimental-api` feature.
+> Once `unboxed_closures` and `fn_traits` stabilize,
+> this nightly syntax will be the preferred syntax,
+> and this will no longer be feature-gated.
+> (Without nightly, you must instead call the slightly more verbose
+> `get.as_ref(some_capsule).clone()` and `register.register(effect())`.)
+
 
 ## Getting Started
 Simply run:
@@ -92,16 +101,8 @@ Also, there is some WIP [documentation] that will help you learn the core concep
 
 
 ## Minimum Supported Rust Version (MSRV)
-The MSRV of `rearch` is currently 1.75.0 and may change in any new ReArch version/release.
-The MSRV of other crates in this repo will be the latest stable release for the foreseeable future.
-
-It is also worth mentioning that the example shown in "In a Nutshell" above requires nightly
-for `unboxed_closures` and `fn_traits`, which is feature-gated under the `experimental-api` feature.
-Once `unboxed_closures` and `fn_traits` stabilize,
-this nightly syntax will be the preferred syntax,
-and this will no longer be feature-gated.
-(Without nightly, you must instead call the slightly more verbose
-`get.as_ref(some_capsule).clone()` and `register.register(effect())`.)
+The MSRV is the current stable Rust version for all crates in this repo.
+As such, any new release may require an updated Rust installation.
 
 
 ## Help Wanted!

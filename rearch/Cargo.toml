@@ -2,7 +2,6 @@
 name = "rearch"
 version = "0.10.2"
 documentation = "https://docs.rs/rearch"
-rust-version = "1.75"
 edition.workspace = true
 license.workspace = true
 description.workspace = true
