@@ -43,6 +43,10 @@ impl<'a> SideEffectRegistrar<'a> {
     /// # Panics
     /// Panics when the supplied type `T` changes between builds.
     /// Ensure T remains the same across builds (e.g., by calling this function unconditionally).
+    #[allow(
+        clippy::type_complexity,
+        reason = "Return type refactor would require breaking change"
+    )]
     pub fn raw<T>(
         self,
         initial: T,

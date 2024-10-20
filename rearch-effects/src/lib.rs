@@ -39,6 +39,10 @@ type SideEffectMutation<'f, ST> = Box<dyn 'f + FnOnce(&mut <ST as StateTransform
 pub fn as_listener() -> impl for<'a> SideEffect<Api<'a> = ()> {}
 
 /// Analogous to [`SideEffectRegistrar::raw`], but uses a [`StateTransformer`] to specify the api.
+#[allow(
+    clippy::type_complexity,
+    reason = "Return type refactor would require breaking change"
+)]
 pub fn raw<ST: StateTransformer>(
     initial: ST::Input,
 ) -> impl for<'a> SideEffect<

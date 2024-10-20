@@ -10,10 +10,6 @@ use crate::{
     EXCLUSIVE_OWNER_MSG,
 };
 
-#[expect(
-    clippy::module_name_repetitions,
-    reason = "https://github.com/rust-lang/rust-clippy/issues/8524"
-)]
 pub struct ContainerReadTxn<'a> {
     pub(crate) data: RwLockReadGuard<'a, HashMap<CapsuleId, Box<dyn Any + Send + Sync>>>,
 }
@@ -43,10 +39,6 @@ impl ContainerReadTxn<'_> {
     }
 }
 
-#[expect(
-    clippy::module_name_repetitions,
-    reason = "https://github.com/rust-lang/rust-clippy/issues/8524"
-)]
 pub struct ContainerWriteTxn<'a> {
     pub(crate) side_effect_txn_orchestrator: SideEffectTxnOrchestrator,
     pub(crate) data: RwLockWriteGuard<'a, HashMap<CapsuleId, Box<dyn Any + Send + Sync>>>,
