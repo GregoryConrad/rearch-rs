@@ -211,10 +211,7 @@ mod dyn_capsule_key {
         }
 
         fn dyn_eq(&self, other: &dyn DynCapsuleKey) -> bool {
-            other
-                .as_any()
-                .downcast_ref::<T>()
-                .map_or(false, |other| self == other)
+            other.as_any().downcast_ref::<T>() == Some(self)
         }
     }
     impl Hash for dyn DynCapsuleKey {

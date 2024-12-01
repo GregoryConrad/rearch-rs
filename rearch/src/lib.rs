@@ -480,7 +480,7 @@ impl CapsuleManager {
             .remove(&id)
             .as_ref()
             .map(downcast_capsule_data::<C>)
-            .map_or(true, |old_data| !C::eq(old_data, &new_data));
+            .is_none_or(|old_data| !C::eq(old_data, &new_data));
 
         txn.data.insert(id, Box::new(new_data));
 
