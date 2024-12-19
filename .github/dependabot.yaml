@@ -1,38 +1,7 @@
 version: 2
 updates:
   - package-ecosystem: cargo
-    directory: "/rearch"
+    directories:
+      - "**/*"
     schedule:
-      interval: weekly
-  - package-ecosystem: cargo
-    directory: "/rearch-macros"
-    schedule:
-      interval: weekly
-  - package-ecosystem: cargo
-    directory: "/rearch-effects"
-    schedule:
-      interval: weekly
-  - package-ecosystem: cargo
-    directory: "/rearch-tokio"
-    schedule:
-      interval: weekly
-  - package-ecosystem: cargo
-    directory: "/examples/axum"
-    schedule:
-      interval: weekly
-  - package-ecosystem: cargo
-    directory: "/examples/fibonacci"
-    schedule:
-      interval: weekly
-  - package-ecosystem: cargo
-    directory: "/examples/simple-demo"
-    schedule:
-      interval: weekly
-  - package-ecosystem: cargo
-    directory: "/examples/large-list"
-    schedule:
-      interval: weekly
-  - package-ecosystem: cargo
-    directory: "/examples/count-bench"
-    schedule:
-      interval: weekly
+      interval: "weekly"
