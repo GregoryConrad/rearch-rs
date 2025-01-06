@@ -15,7 +15,7 @@ use uuid::Uuid;
 async fn main() {
     let app = Router::new()
         .route("/todos", get(list_todos).post(create_todo))
-        .route("/todos/:id", get(read_todo).delete(delete_todo))
+        .route("/todos/{id}", get(read_todo).delete(delete_todo))
         .with_state(Container::new());
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:8080").await.unwrap();
