@@ -43,6 +43,6 @@ jobs:
       - name: Run tests under WASI
         if: startsWith(matrix.os, 'macos')
         run: |
-          rustup target add wasm32-wasi
-          brew install wasmer
-          CARGO_TARGET_WASM32_WASI_RUNNER="wasmer" cargo test --target="wasm32-wasi" --package=rearch
+          rustup target add wasm32-wasip2
+          brew install wasmtime
+          CARGO_TARGET_WASM32_WASIP2_RUNNER="wasmtime" cargo test --target="wasm32-wasip2" --package=rearch
