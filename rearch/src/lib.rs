@@ -1061,6 +1061,7 @@ mod tests {
     mod side_effect_txns {
         use super::*;
 
+        #[allow(clippy::type_complexity)]
         fn two_side_effects_capsule(
             CapsuleHandle { register, .. }: CapsuleHandle,
         ) -> ((u8, impl CData + Fn(u8)), (u8, impl CData + Fn(u8))) {
