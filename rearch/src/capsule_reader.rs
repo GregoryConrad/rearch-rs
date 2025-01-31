@@ -17,7 +17,7 @@ enum InternalCapsuleReader<'scope, 'total> {
 }
 
 impl<'scope, 'total> CapsuleReader<'scope, 'total> {
-    pub(crate) fn new(id: CapsuleId, txn: &'scope mut ContainerWriteTxn<'total>) -> Self {
+    pub(crate) const fn new(id: CapsuleId, txn: &'scope mut ContainerWriteTxn<'total>) -> Self {
         Self(InternalCapsuleReader::Normal { id, txn })
     }
 

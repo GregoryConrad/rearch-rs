@@ -92,7 +92,7 @@ impl<T> MutationState<T> {
         }
     }
 
-    pub fn as_mut(&mut self) -> MutationState<&mut T> {
+    pub const fn as_mut(&mut self) -> MutationState<&mut T> {
         match *self {
             Self::Idle(ref mut prev) => MutationState::Idle(prev.as_mut()),
             Self::Loading(ref mut prev) => MutationState::Loading(prev.as_mut()),
