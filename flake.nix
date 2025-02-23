@@ -29,6 +29,7 @@
           packages = with pkgs; [
             # Switch "stable" to "complete" for nightly
             fenix.packages.${system}.stable.toolchain
+            curl # NOTE: needed to compile cargo-smart-release
           ];
 
           env = {
