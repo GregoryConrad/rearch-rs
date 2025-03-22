@@ -9,8 +9,8 @@ use crate::{
 /// to register multiple side effects, simply pass them in together!
 pub struct SideEffectRegistrar<'a> {
     side_effect: &'a mut OnceCell<Box<dyn Any + Send>>,
-    side_effect_state_mutation_runner: SideEffectStateMutationRunner,
-    side_effect_txn_runner: SideEffectTxnRunner,
+    state_mutation_runner: SideEffectStateMutationRunner,
+    txn_runner: SideEffectTxnRunner,
 }
 
 impl<'a> SideEffectRegistrar<'a> {
@@ -26,8 +26,8 @@ impl<'a> SideEffectRegistrar<'a> {
     ) -> Self {
         Self {
             side_effect,
-            side_effect_state_mutation_runner,
-            side_effect_txn_runner,
+            state_mutation_runner: side_effect_state_mutation_runner,
+            txn_runner: side_effect_txn_runner,
         }
     }
 
@@ -67,7 +67,7 @@ impl<'a> SideEffectRegistrar<'a> {
             .unwrap_or_else(|| panic!("{}", EFFECT_FAILED_CAST_MSG));
 
         let mutation_runner = move |mutation: Box<dyn '_ + FnOnce(&mut T)>| {
-            (self.side_effect_state_mutation_runner)(Box::new(|data| {
+            (self.state_mutation_runner)(Box::new(|data| {
                 let data = data
                     .downcast_mut::<T>()
                     .unwrap_or_else(|| panic!("{}", EFFECT_FAILED_CAST_MSG));
@@ -75,7 +75,7 @@ impl<'a> SideEffectRegistrar<'a> {
             }));
         };
 
-        (data, mutation_runner, self.side_effect_txn_runner)
+        (data, mutation_runner, self.txn_runner)
     }
 }
 
