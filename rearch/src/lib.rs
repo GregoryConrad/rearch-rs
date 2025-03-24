@@ -321,7 +321,7 @@ impl ArcContainerStore for Arc<ContainerStore> {
 
     fn run_side_effect_mutation(&self, id: CapsuleId, mutation: SideEffectStateMutation) {
         #[cfg(feature = "logging")]
-        log::debug!("Mutating side effect state in Capsule ({:?})", id);
+        log::debug!("Mutating side effect state in Capsule ({id:?})");
 
         self.run_side_effect_txn(|| {
             mutation(
@@ -389,8 +389,7 @@ impl SideEffectTxnOrchestrator {
             let Some(store) = self.0.upgrade() else {
                 #[cfg(feature = "logging")]
                 log::warn!(
-                    "Attempted to mutate side effect after Container disposal on Capsule ({:?})",
-                    id
+                    "Attempted to mutate side effect after Container disposal on Capsule ({id:?})"
                 );
                 return;
             };
@@ -448,7 +447,7 @@ impl CapsuleManager {
     /// Builds a capsule's new data and puts it into the txn, returning true when the data changes.
     fn build<C: Capsule>(id: CapsuleId, txn: &mut ContainerWriteTxn) -> bool {
         #[cfg(feature = "logging")]
-        log::trace!("Building {} ({:?})", std::any::type_name::<C>(), id);
+        log::trace!("Building {} ({id:?})", std::any::type_name::<C>());
 
         let new_data = {
             let side_effect_state_mutater = txn

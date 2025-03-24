@@ -106,7 +106,7 @@ impl ContainerWriteTxn<'_> {
             self.nodes.entry(CapsuleId::clone(&id))
         {
             #[cfg(feature = "logging")]
-            log::debug!("Initializing {} ({:?})", std::any::type_name::<C>(), id);
+            log::debug!("Initializing {} ({id:?})", std::any::type_name::<C>());
 
             e.insert(CapsuleManager::new(capsule));
             self.build_single_node(&id);
