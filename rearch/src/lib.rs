@@ -112,7 +112,7 @@ pub trait SideEffect {
 }
 impl<T, F: FnOnce(SideEffectRegistrar) -> T> SideEffect for F {
     type Api<'registrar> = T;
-    fn build(self, registrar: SideEffectRegistrar) -> Self::Api<'_> {
+    fn build(self, registrar: SideEffectRegistrar<'_>) -> Self::Api<'_> {
         self(registrar)
     }
 }
@@ -304,11 +304,11 @@ trait ArcContainerStore {
     fn run_side_effect_txn<F: FnOnce()>(&self, txn: F);
 }
 impl ArcContainerStore for Arc<ContainerStore> {
-    fn read_txn(&self) -> ContainerReadTxn {
+    fn read_txn(&self) -> ContainerReadTxn<'_> {
         ContainerReadTxn::new(self.data.read())
     }
 
-    fn write_txn(&self) -> ContainerWriteTxn {
+    fn write_txn(&self) -> ContainerWriteTxn<'_> {
         // NOTE: nodes must be acquired before data to remain deadlock free
         let nodes = self.nodes.lock();
         let data = self.data.write();
