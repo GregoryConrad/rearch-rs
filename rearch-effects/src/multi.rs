@@ -95,7 +95,7 @@ where
     F: FnOnce(SideEffectRegistrar) -> MultiSideEffectRegistrar,
 {
     type Api<'a> = MultiSideEffectRegistrar<'a>;
-    fn build(self, registrar: SideEffectRegistrar) -> Self::Api<'_> {
+    fn build(self, registrar: SideEffectRegistrar<'_>) -> Self::Api<'_> {
         self.0(registrar)
     }
 }

@@ -14,7 +14,7 @@ where
     ST: StateTransformer,
 {
     type Api<'a> = ST::Output<'a>;
-    fn build(self, registrar: SideEffectRegistrar) -> Self::Api<'_> {
+    fn build(self, registrar: SideEffectRegistrar<'_>) -> Self::Api<'_> {
         self.0(registrar)
     }
 }
@@ -35,7 +35,7 @@ where
     ST: StateTransformer,
 {
     type Api<'a> = (ST::Output<'a>, R1);
-    fn build(self, registrar: SideEffectRegistrar) -> Self::Api<'_> {
+    fn build(self, registrar: SideEffectRegistrar<'_>) -> Self::Api<'_> {
         self.0(registrar)
     }
 }
@@ -56,7 +56,7 @@ where
     ST: StateTransformer,
 {
     type Api<'a> = (ST::Output<'a>, R1, R2);
-    fn build(self, registrar: SideEffectRegistrar) -> Self::Api<'_> {
+    fn build(self, registrar: SideEffectRegistrar<'_>) -> Self::Api<'_> {
         self.0(registrar)
     }
 }
