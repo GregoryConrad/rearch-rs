@@ -108,7 +108,7 @@ where
     ST: StateTransformer,
 {
     type Api<'a> = (MutationState<ST::Output<'a>>, R1, R2);
-    fn build(self, registrar: SideEffectRegistrar) -> Self::Api<'_> {
+    fn build(self, registrar: SideEffectRegistrar<'_>) -> Self::Api<'_> {
         self.0(registrar)
     }
 }
