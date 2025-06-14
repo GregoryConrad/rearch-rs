@@ -1,4 +1,4 @@
-use std::{any::Any, cell::OnceCell};
+use std::{any::Any, cell::OnceCell, ops::DerefMut};
 
 use crate::{
     CData, SideEffect, SideEffectStateMutationRunner, SideEffectTxnRunner, EFFECT_FAILED_CAST_MSG,
@@ -63,6 +63,7 @@ impl<'a> SideEffectRegistrar<'a> {
             .side_effect
             .get_mut()
             .expect("Side effect should've been initialized in get_or_init above")
+            .deref_mut()
             .downcast_mut::<T>()
             .unwrap_or_else(|| panic!("{}", EFFECT_FAILED_CAST_MSG));
 

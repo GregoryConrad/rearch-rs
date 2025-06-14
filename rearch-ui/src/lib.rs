@@ -76,7 +76,7 @@ impl Context {
 }
 
 fn keys_eq<T: PartialEq + 'static>(old: &Key, new: &Key) -> bool {
-    if let (Some(old), Some(new)) = (old.downcast_ref::<T>(), new.downcast_ref::<T>()) {
+    if let (Some(old), Some(new)) = ((**old).downcast_ref::<T>(), (**new).downcast_ref::<T>()) {
         old == new
     } else {
         false

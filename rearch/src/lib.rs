@@ -412,7 +412,8 @@ impl SideEffectTxnOrchestrator {
 }
 
 fn downcast_capsule_data<C: Capsule>(x: &impl Deref<Target = dyn Any + Send + Sync>) -> &C::Data {
-    x.downcast_ref::<C::Data>()
+    x.deref()
+        .downcast_ref::<C::Data>()
         .expect("Types should be properly enforced due to generics")
 }
 
