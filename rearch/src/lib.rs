@@ -108,7 +108,7 @@ pub trait SideEffect {
     type Api<'registrar>;
 
     /// Construct this side effect's `Api` via the given [`SideEffectRegistrar`].
-    fn build(self, registrar: SideEffectRegistrar) -> Self::Api<'_>;
+    fn build(self, registrar: SideEffectRegistrar<'_>) -> Self::Api<'_>;
 }
 impl<T, F: FnOnce(SideEffectRegistrar) -> T> SideEffect for F {
     type Api<'registrar> = T;
@@ -298,8 +298,8 @@ struct ContainerStore {
     curr_side_effect_txn_modified_ids: ReentrantMutex<RefCell<Option<HashSet<CapsuleId>>>>,
 }
 trait ArcContainerStore {
-    fn read_txn(&self) -> ContainerReadTxn;
-    fn write_txn(&self) -> ContainerWriteTxn;
+    fn read_txn(&self) -> ContainerReadTxn<'_>;
+    fn write_txn(&self) -> ContainerWriteTxn<'_>;
     fn run_side_effect_mutation(&self, id: CapsuleId, mutation: SideEffectStateMutation);
     fn run_side_effect_txn<F: FnOnce()>(&self, txn: F);
 }
