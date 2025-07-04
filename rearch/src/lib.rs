@@ -704,7 +704,7 @@ mod tests {
     fn listener_side_effects_update() {
         use std::sync::{Arc, Mutex};
 
-        fn rebuildable(CapsuleHandle { register, .. }: CapsuleHandle) -> (impl CData + Fn()) {
+        fn rebuildable(CapsuleHandle { register, .. }: CapsuleHandle) -> impl CData + Fn() {
             register.register(effects::rebuilder())
         }
 
