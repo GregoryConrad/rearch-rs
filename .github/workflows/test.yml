@@ -19,30 +19,27 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@v1
-        with:
-          toolchain: ${{ matrix.toolchain }}
-          components: rustfmt, clippy
+      - uses: actions/checkout@v5
+      - run: rustup component add rustfmt clippy --toolchain ${{ matrix.toolchain }}
 
       - name: Check format
-        run: cargo fmt --all --check
+        run: cargo +${{ matrix.toolchain }} fmt --all --check
 
       - name: Code analysis (--no-default-features)
-        run: cargo clippy --workspace --no-default-features -- -D warnings
+        run: cargo +${{ matrix.toolchain }} clippy --workspace --no-default-features -- -D warnings
       - name: Code analysis (--all-targets --all-features)
         if: matrix.toolchain == 'nightly' # experimental-api requires nightly
-        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+        run: cargo +${{ matrix.toolchain }} clippy --workspace --all-targets --all-features -- -D warnings
 
       - name: Run tests (--no-default-features)
-        run: cargo test --workspace --no-default-features
+        run: cargo +${{ matrix.toolchain }} test --workspace --no-default-features
       - name: Run tests (--all-features)
         if: matrix.toolchain == 'nightly' # experimental-api requires nightly
-        run: cargo test --workspace --all-features
+        run: cargo +${{ matrix.toolchain }} test --workspace --all-features
 
       - name: Run tests under WASI
         if: startsWith(matrix.os, 'macos')
         run: |
-          rustup target add wasm32-wasip2
+          rustup target add wasm32-wasip2 --toolchain ${{ matrix.toolchain }}
           brew install wasmtime
-          CARGO_TARGET_WASM32_WASIP2_RUNNER="wasmtime" cargo test --target="wasm32-wasip2" --package=rearch
+          CARGO_TARGET_WASM32_WASIP2_RUNNER="wasmtime" cargo +${{ matrix.toolchain }} test --target="wasm32-wasip2" --package=rearch
