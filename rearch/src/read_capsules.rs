@@ -55,7 +55,7 @@ pub trait CapsulesWithRefRead {
 macro_rules! generate_capsule_list_impl {
     ($($C:ident),+) => {
         paste::paste! {
-            #[allow(non_snake_case, unused_parens)]
+            #[allow(non_snake_case, unused_parens, clippy::double_parens)]
             impl<$($C: Capsule),*> CapsulesWithRefRead for ($($C),*) {
                 type Data<'a> = ($(&'a $C::Data),*);
                 fn read<Callback, CallbackReturn>(
