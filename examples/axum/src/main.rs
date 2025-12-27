@@ -29,6 +29,7 @@ struct TodoWithId {
 }
 
 // We define our todo db capsules here
+#[allow(clippy::result_large_err)]
 mod todo_db {
     use std::sync::Arc;
 

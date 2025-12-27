@@ -28,6 +28,4 @@ style = "warn"
 suspicious = "warn"
 clone_on_ref_ptr = "warn"
 unwrap_used = "warn"
-
-# TODO(GregoryConrad): remove the following once tokio's deps are updated.
-multiple_crate_versions = { level = "allow", priority = 1}
+multiple_crate_versions = { level = "allow", priority = 1 }
