@@ -169,7 +169,7 @@ async fn delete_todo(
 }
 
 enum AppError {
-    Redb(redb::Error),
+    Redb(Box<redb::Error>),
     TodoNotFound,
 }
 impl IntoResponse for AppError {
@@ -186,6 +186,6 @@ impl IntoResponse for AppError {
 }
 impl From<redb::Error> for AppError {
     fn from(err: redb::Error) -> Self {
-        Self::Redb(err)
+        Self::Redb(Box::new(err))
     }
 }
